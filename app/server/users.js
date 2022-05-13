@@ -5,8 +5,23 @@ Accounts.onCreateUser((options, user) => {
     ...options.profile,
     levelId: Meteor.settings.defaultLevelId,
   };
+  // TODO find a better way to handle user.emails on sso authentication :)
+  if (!user.emails && user.services) {
+    user.emails = [];
+    Object.keys(user.services).forEach(key => {
+      if (user.services[key]?.email) {
+        user.emails.push({ address: user.services[key]?.email, verified: true });
+      }
+    });
+    updateSkin(user, user.profile.levelId);
+  }
 
   return user;
+});
+
+Accounts.setAdditionalFindUserOnExternalLogin(({ serviceName, serviceData }) => {
+  log('setAdditionalFindUserOnExternalLogin: ', { serviceName });
+  return Accounts.findUserByEmail(serviceData.email);
 });
 
 Accounts.validateNewUser(() => true);

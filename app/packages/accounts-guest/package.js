@@ -30,11 +30,17 @@ Package.onUse(api => {
   api.use('useraccounts:unstyled@1.12.0', 'client', { weak: true });
 
   api.use('blaze@=2.5.0', 'client');
-  api.use('iron:router@=1.0.13 || 1.0.12 || =1.0.11 || =1.0.10 || =1.0.9',
-    'client', { weak: true });
-  api.use('kadira:flow-router' +
+  api.use(
+    'iron:router@=1.0.13 || 1.0.12 || =1.0.11 || =1.0.10 || =1.0.9',
+    'client',
+    { weak: true },
+  );
+  api.use(
+    'kadira:flow-router' +
     '@=2.12.1 || =2.10.1 || =2.9.0 || =2.8.0 || =2.7.0 || =2.6.2 || =2.5.0',
-  'client', { weak: true });
+    'client',
+    { weak: true },
+  );
 
   api.use('useraccounts:iron-routing@1.12.1', 'client', { weak: true });
   api.use('useraccounts:flow-routing@1.12.0', 'client', { weak: true });
@@ -51,12 +57,18 @@ Package.onUse(api => {
   api.use('tracker');
   api.use('reactive-var');
   api.use('callback-hook', 'server');
-  api.use('service-configuration', 'server');
+  api.use('service-configuration', ['client', 'server']);
   api.use('accounts-password', 'server', { weak: true });
   api.addFiles('accounts-login-state-client.js', 'client');
   api.addFiles('accounts-login-state-server.js', 'server');
+  api.export('ServiceConfiguration');
   api.export('LoginState');
-
+  api.use('oauth', ['client', 'server']);
+  api.use('oauth2', ['client', 'server']);
+  api.use('accounts-oauth', ['client', 'server']);
+  api.addFiles('accounts-oauth-server.js', 'server');
+  api.addFiles('accounts-oauth-client.js', 'client');
+  api.export('capitalize', ['client', 'server']);
   // ===========================================
   // accounts-guest
   // ===========================================

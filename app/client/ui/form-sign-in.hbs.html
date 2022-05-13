@@ -6,7 +6,7 @@
       <button type="button" class="js-next-step submit" aria-label="create an account">Créer un compte</button><br />
       <a href="?mode=login" class="link">J'ai déjà un compte</a>
     {{/if}}
-
+    {{> loginServices }}
     {{#if eq getStep 2}}
       <button type="button" class="js-previous-step" aria-label="go to the previous step">&laquo;</button>
       <h1 class="title">✉️ Votre email</h1>

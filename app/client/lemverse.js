@@ -434,7 +434,10 @@ Template.lemverse.onCreated(function () {
 
     const user = Meteor.user();
     if (!user.roles?.admin) return;
-    if (!userProximitySensor.nearUsersCount() && event.type === 'keydown') { lp.notif.error(`You need someone near you to whisper`); return; }
+    if (!userProximitySensor.nearUsersCount() && event.type === 'keydown') {
+      lp.notif.error(`You need someone near you to whisper`);
+      return;
+    }
 
     userVoiceRecorderAbility.recordVoice(event.type === 'keydown', sendAudioChunksToNearUsers);
   });
