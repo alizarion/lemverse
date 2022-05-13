@@ -130,6 +130,8 @@ module.exports = {
     charactersParts: 'writable',
     characterPopIns: 'writable',
     generateRandomCharacterSkin: 'writable',
+    completeUserProfile: 'writable',
+    capitalize: 'writable',
     generateTURNCredentials: 'writable',
     isModalOpen: 'writable',
     toggleModal: 'writable',

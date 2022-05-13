@@ -386,7 +386,7 @@ userManager = {
   interpolatePlayerPositions() {
     const now = moment();
     Object.values(this.players).forEach(player => {
-      if (player.userId === this.player.userId) return;
+      if (player.userId === this.player?.userId) return;
 
       if (!player.lwTargetDate) {
         this.pauseAnimation(player, true);
