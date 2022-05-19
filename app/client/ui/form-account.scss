@@ -20,6 +20,22 @@
     opacity: 1;
   }
 
+  .login-action {
+    display: flex;
+    align-items: center;
+  }
+
+  .login-email {
+    text-align: center;
+    flex: 48%;
+  }
+  .login-split {
+    margin: 30px;
+    flex: 4%;
+  }
+  .login-social {
+    flex: 48%;
+  }
   .title {
     margin: 5px 0 20px 0;
     padding: 0;
