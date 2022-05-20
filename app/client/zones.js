@@ -75,7 +75,7 @@ zones = {
   },
 
   openZoneURL(zone) {
-    this.getIframeElement().src = zone.url;
+    this.getIframeElement().src = evalUrl(zone.url, Meteor.user());
     if (zone.yt) this.getIframeElement().allow = iframeAllowAttributeSettings;
     this.getWebpageElement().classList.add('show');
 
