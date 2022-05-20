@@ -57,6 +57,12 @@ formatURL = url => {
   return formattedURL;
 };
 
+evalUrl = (templateString, data) => {
+  // eslint-disable-next-line no-new-func
+  const makeTemp = templateData => new Function(`{${Object.keys(templateData).join(',')}}`, `return \`${templateString}\``)(templateData);
+  return makeTemp(data);
+};
+
 formatURLs = (text, shortName = false) => text.replace(/(https?:\/\/[^\s]+)/g, url => {
   const formatedURL = formatURL(url);
   if (!formatedURL) return url;

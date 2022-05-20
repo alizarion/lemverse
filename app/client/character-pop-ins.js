@@ -42,7 +42,7 @@ characterPopIns = {
   },
 
   createOrUpdate(popInIdentifier, popInContent, config = {}) {
-    const content = config.iframe ? this.createIframeFromURL(popInContent) : this.formatText(popInContent, config);
+    const content = evalUrl(config.iframe ? this.createIframeFromURL(popInContent) : this.formatText(popInContent, config), Meteor.user());
 
     let popIn = this.popIns[popInIdentifier];
     if (!popIn) {

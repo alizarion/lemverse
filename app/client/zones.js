@@ -186,7 +186,7 @@ zones = {
       if (zone.name && !zone.hideName) Session.set('showZoneName', zone);
 
       if (zone.url) {
-        this.getIframeElement().src = zone.url;
+        this.getIframeElement().src = evalUrl(zone.url, Meteor.user());
         if (zone.yt) this.getIframeElement().allow = iframeAllowAttributeSettings;
         this.getWebpageElement().classList.add('show');
       } else if (!zone.url && !meet.api) this.closeIframeElement();

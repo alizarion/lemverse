@@ -166,6 +166,7 @@ module.exports = {
     relativePositionToCamera: 'writable',
     updateViewport: 'writable',
     formatURL: 'writable',
+    evalUrl: 'writable',
     sendDataToUsers: 'writable',
     sendDataToUsersInZone: 'writable',
 
