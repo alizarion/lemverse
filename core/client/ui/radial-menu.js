@@ -1,6 +1,11 @@
 /* eslint-disable no-use-before-define */
 
+import { setReaction } from '../helpers';
+
 let menuOpenUsingKey = false;
+let menuHandler;
+let canvasElement;
+
 const metaKeyCode = 91;
 const keyToOpen = 'shift';
 const keyToOpenDelay = 200;
@@ -11,17 +16,16 @@ const radialMenuOffsetY = 38;
 const mouseDistanceToCloseMenu = 105;
 const itemAmountRequiredForBackground = 2;
 const radialMenuStartingAngle = 3.8; // in radians
-let menuHandler;
 Session.set('radialMenuModules', []);
 
-const menuCurrentUser = () => {
+const menuCurrentUser = (options = {}) => {
   const menu = Session.get('menu');
   if (!menu) return undefined;
 
   const { userId } = menu;
   if (!userId) return undefined;
 
-  return Meteor.users.findOne(userId);
+  return Meteor.users.findOne(userId, options);
 };
 
 const lovePhrases = userName => [
@@ -52,7 +56,6 @@ const reactionMenuItems = [
 const mainMenuItems = [
   { id: 'reactions', icon: '😃', order: 1, shortcut: 53, label: 'Reactions' },
   { id: 'notifications', icon: '🔔', order: 2, shortcut: 54, label: 'Notifications', closeMenu: true },
-  { id: 'shout', icon: '📢', label: 'Shout', order: 40, shortcut: 55 },
 ];
 
 const otherUserMenuItems = [
@@ -71,10 +74,9 @@ const onMenuOptionSelected = e => {
 
   if (option.id === 'reactions') buildMenuFromOptions(reactionMenuItems);
   else if (option.id === 'notifications') toggleModal('notifications');
-  else if (option.id === 'shout') userVoiceRecorderAbility.recordVoice(true, sendAudioChunksToUsersInZone);
   else if (option.id === 'send-love' && user) setReaction(Random.choice(lovePhrases(user.profile.name)));
   else if (option.id === 'follow' && user) userManager.follow(user);
-  else if (option.id === 'show-profile') Session.set('modal', { template: 'profile', userId: Session.get('menu')?.userId });
+  else if (option.id === 'show-profile') Session.set('modal', { template: 'userProfile', userId: Session.get('menu')?.userId });
   else if (option.id === 'go-back') buildMenuFromOptions([...mainMenuItems, ...additionalOptions('me')]);
   else if (option.id === 'custom-reaction') setReaction(Meteor.user().profile.defaultReaction || Meteor.settings.public.defaultReaction);
   else if (option.id === 'emoji') setReaction(option.icon);
@@ -93,8 +95,7 @@ const onMenuOptionSelected = e => {
 const onMenuOptionUnselected = e => {
   const { option } = e.detail;
 
-  if (option.id === 'shout') userVoiceRecorderAbility.recordVoice(false, sendAudioChunksToUsersInZone);
-  else if (option.id === 'send-love') setReaction();
+  if (option.id === 'send-love') setReaction();
   else if (option.id === 'send-vocal') userVoiceRecorderAbility.recordVoice(false, sendAudioChunksToNearUsers);
   else if (option.id === 'custom-reaction') setReaction();
   else if (option.id === 'emoji') setReaction();
@@ -103,11 +104,6 @@ const onMenuOptionUnselected = e => {
 const computeMenuPosition = () => {
   const position = Session.get('menu-position');
   return { x: (position?.x || 0) + menuOffset.x, y: (position.y || 0) + menuOffset.y };
-};
-
-const setReaction = reaction => {
-  if (reaction) Meteor.users.update(Meteor.userId(), { $set: { 'profile.reaction': reaction } });
-  else Meteor.users.update(Meteor.userId(), { $unset: { 'profile.reaction': 1 } });
 };
 
 const buildMenuFromOptions = options => {
@@ -120,7 +116,7 @@ const buildMenuFromOptions = options => {
       newOptions.push({ ...options[i], x, y: horizontalMenuItemDistance.y });
     }
   } else {
-    const theta = 2 * Math.PI / allOptions.length;
+    const theta = (2 * Math.PI) / allOptions.length;
     const offset = Math.PI / 2 - theta;
 
     for (let i = 0; i < allOptions.length; i++) {
@@ -137,7 +133,14 @@ const buildMenuFromOptions = options => {
 const onMouseMove = event => {
   if (!Session.get('menu') || menuOpenUsingKey) return;
   const menuPosition = computeMenuPosition();
-  const mousePosition = { x: event.clientX, y: event.clientY };
+
+  // Get canvas bound go manage mouse position offset
+  if (!canvasElement) canvasElement = document.querySelector('#game canvas');
+  const canvasBounds = canvasElement.getBoundingClientRect();
+  const mousePosition = {
+    x: event.clientX - canvasBounds.x,
+    y: event.clientY - canvasBounds.y,
+  };
   const distance = Math.sqrt((menuPosition.x - mousePosition.x) ** 2 + ((menuPosition.y - radialMenuOffsetY) - mousePosition.y) ** 2);
   if (distance >= mouseDistanceToCloseMenu) closeMenu();
 };
@@ -159,12 +162,16 @@ Template.radialMenu.onCreated(function () {
 
   // allow users to react without opening the menu
   hotkeys('1,2,3,4,5,6,7,8,9', { keyup: true, scope: scopes.player }, e => {
+    if (e.repeat) return;
+
     const option = reactionMenuItems.find(menuItem => menuItem.shortcut === e.keyCode);
     if (e.type === 'keyup') window.dispatchEvent(new CustomEvent(eventTypes.onMenuOptionUnselected, { detail: { option } }));
     else if (e.type === 'keydown') window.dispatchEvent(new CustomEvent(eventTypes.onMenuOptionSelected, { detail: { option } }));
   });
 
   hotkeys('*', { keyup: true, scope: scopes.player }, e => {
+    if (e.repeat) return;
+
     // show/hide shortcuts
     if (e.key.toLowerCase() === keyToOpen && !hotkeys.isPressed(metaKeyCode)) {
       this.showShortcuts.set(e.type === 'keydown');
@@ -176,7 +183,7 @@ Template.radialMenu.onCreated(function () {
           menuOpenUsingKey = true;
           const worldScene = game.scene.getScene('WorldScene');
           const userId = Meteor.userId();
-          const player = userManager.players[userId];
+          const player = userManager.getCharacter(userId);
           if (!player) return;
 
           Session.set('menu', { userId });
@@ -239,5 +246,5 @@ Template.radialMenu.helpers({
   position() { return computeMenuPosition(); },
   showBackground() { return menuOptions.get().length > itemAmountRequiredForBackground; },
   showShortcuts() { return Template.instance().showShortcuts.get(); },
-  username() { return menuCurrentUser()?.profile.name; },
+  username() { return menuCurrentUser({ fields: { 'profile.name': 1 } })?.profile.name; },
 });

@@ -1,4 +1,6 @@
 import Phaser from 'phaser';
+import CharacterNameText from '../components/character-name-text';
+import { getSimulationSize } from '../helpers';
 
 const characterUIElementsOffset = -85;
 
@@ -13,7 +15,8 @@ UIScene = new Phaser.Class({
     this.characterNamesObjects = {};
     this.preRenderMethod = this.preRender.bind(this);
     this.shutdownMethod = this.shutdown.bind(this);
-    this.updateViewportMethod = mode => updateViewport(this, mode);
+    this.viewportMode = viewportModes.fullscreen;
+    this.updateViewportMethod = () => updateViewport(this, this.viewportMode);
     this.reactionPool = this.add.group({ classType: CharacterReaction });
     this.UIElementsOffset = characterUIElementsOffset;
     this.physics.disableUpdate();
@@ -21,13 +24,14 @@ UIScene = new Phaser.Class({
   },
 
   create() {
+    const { width, height } = getSimulationSize();
+
     // cameras
-    this.cameras.main.setViewport(0, 0, window.innerWidth, window.innerHeight);
+    this.cameras.main.setViewport(0, 0, width, height);
     this.cameras.main.setRoundPixels(false);
 
     // plugins
     characterPopIns.init(this);
-    userChatCircle.init(this);
     userVoiceRecorderAbility.init(this);
 
     // events
@@ -43,7 +47,7 @@ UIScene = new Phaser.Class({
     };
   },
 
-  update(time, delta) {
+  update(_time, delta) {
     userVoiceRecorderAbility.update(delta);
   },
 
@@ -51,18 +55,16 @@ UIScene = new Phaser.Class({
     const worldMainCamera = game.scene.getScene('WorldScene').cameras.main;
     this.UIElementsOffset = characterUIElementsOffset * worldMainCamera.zoom;
 
-    _.each(this.characterNamesObjects, text => {
+    Object.values(this.characterNamesObjects).forEach(text => {
       const { x, y } = relativePositionToCamera(text.player, worldMainCamera);
       text.setPosition(x, y + this.UIElementsOffset);
     });
 
-    const { player } = userManager;
-    if (!player) return;
+    const controlledCharacter = userManager.getControlledCharacter();
+    if (!controlledCharacter) return;
 
-    const relativePlayerPosition = relativePositionToCamera(player, worldMainCamera);
+    const relativePlayerPosition = relativePositionToCamera(controlledCharacter, worldMainCamera);
     characterPopIns.update(worldMainCamera);
-    userChatCircle.visible(!meet.api && peer.isEnabled() && !Session.get('menu') && userProximitySensor.nearUsersCount() > 0);
-    userChatCircle.update(relativePlayerPosition.x, relativePlayerPosition.y, worldMainCamera);
     userVoiceRecorderAbility.setPosition(relativePlayerPosition.x, relativePlayerPosition.y, worldMainCamera);
   },
 
@@ -77,9 +79,9 @@ UIScene = new Phaser.Class({
     _.each(this.characterNamesObjects, text => text?.destroy());
     this.characterNamesObjects = {};
 
-    _.each(userManager.players, player => {
-      clearInterval(player.reactionHandler);
-      delete player.reactionHandler;
+    _.each(userManager.characters, character => {
+      clearInterval(character.reactionHandler);
+      delete character.reactionHandler;
     });
   },
 
@@ -88,7 +90,6 @@ UIScene = new Phaser.Class({
     this.events.off('prerender', this.preRenderMethod, this);
     this.scale.off('resize', this.updateViewportMethod);
 
-    userChatCircle.destroy();
     userVoiceRecorderAbility.destroy();
     this.onLevelUnloaded();
   },
@@ -109,16 +110,21 @@ UIScene = new Phaser.Class({
     });
   },
 
-  updateUserName(userId, name, colorName) {
+  updateUserIcon(userId, icon) {
+    this.characterNamesObjects[userId].setIcon(icon);
+  },
+
+  updateUserName(userId, name, baseline, color) {
     let textInstance = this.characterNamesObjects[userId];
 
     if (!textInstance) {
-      const player = userManager.players[userId];
+      const player = userManager.getCharacter(userId);
       if (!player) return;
 
-      textInstance = new CharacterNameText(this, player, name, colorName);
+      textInstance = new CharacterNameText(this, name, baseline, color);
+      textInstance.player = player;
       this.characterNamesObjects[userId] = textInstance;
-    } else if (textInstance) textInstance.setColorFromName(colorName).setText(name);
+    } else if (textInstance) textInstance.setColor(color).setText(name, baseline);
   },
 
   destroyUserName(userId) {

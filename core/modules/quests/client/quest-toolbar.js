@@ -1,3 +1,5 @@
+import { toggleUIInputs } from '../../../client/helpers';
+
 const activeQuest = () => {
   const questId = Session.get('selectedQuestId');
   if (!questId) return undefined;
@@ -19,9 +21,9 @@ const joinQuest = () => {
 
   const userId = Meteor.userId();
   Quests.update(questId, { $addToSet: { targets: userId } }, error => {
-    if (error) { lp.notif.error(`Unable to join the quest`); return; }
+    if (error) { lp.notif.error(`Unable to join the task`); return; }
 
-    const message = `{{${userId}}} has joined the quest`;
+    const message = `{{${userId}}} has joined the task`;
     messagesModule.sendMessage(questId, message);
   });
 };
@@ -32,9 +34,9 @@ const leaveQuest = () => {
 
   const userId = Meteor.userId();
   Quests.update(questId, { $pull: { targets: userId } }, error => {
-    if (error) { lp.notif.error(`Unable to leave the quest`); return; }
+    if (error) { lp.notif.error(`Unable to leave the task`); return; }
 
-    const message = `{{${userId}}} left the quest`;
+    const message = `{{${userId}}} left the task`;
     messagesModule.sendMessage(questId, message);
   });
 };
@@ -46,9 +48,9 @@ const toggleQuestState = () => {
   const { completed } = quest;
   const actions = completed ? { $unset: { completed: 1 } } : { $set: { completed: true } };
   Quests.update(quest._id, actions, error => {
-    if (error) { lp.notif.error(`Unable to update the quest`); return; }
+    if (error) { lp.notif.error(`Unable to update the task`); return; }
 
-    const message = `has ${completed ? 'reopened' : 'completed'} the quest`;
+    const message = `has ${completed ? 'reopened' : 'completed'} the task`;
     messagesModule.sendMessage(quest._id, message);
   });
 };
@@ -98,12 +100,12 @@ Template.questToolbar.events({
   'focus .js-quest-name'(event) {
     event.preventDefault();
     event.stopPropagation();
-    hotkeys.setScope(scopes.form); game.scene.keys.WorldScene.enableKeyboard(false, false);
+    toggleUIInputs(true);
   },
   'blur .js-quest-name'(event) {
     event.preventDefault();
     event.stopPropagation();
-    hotkeys.setScope(scopes.player); game.scene.keys.WorldScene.enableKeyboard(true, false);
+    toggleUIInputs(false);
     updateTitle(event.currentTarget.value);
   },
   'click .js-quest-join'(event) {
@@ -147,7 +149,7 @@ Template.questToolbar.onCreated(function () {
     if (!quest) return;
 
     Meteor.call('questUsers', quest._id, (error, users) => {
-      if (error) { lp.notif.error(`An error occured while loading quest users`); return; }
+      if (error) { lp.notif.error(`An error occured while loading tasks`); return; }
       this.users.set(users);
     });
   });

@@ -1,3 +1,5 @@
+import { formatURL, formatURLs } from './helpers';
+
 const dispatchPopInEvent = event => {
   if (characterPopIns.onPopInEvent) characterPopIns.onPopInEvent(event);
 };
@@ -23,9 +25,9 @@ characterPopIns = {
   },
 
   initFromZone(zone) {
-    const config = zone.popInConfiguration || {};
+    const config = { ...zone.popInConfiguration } || {};
     if (config.position) {
-      const position = zones.computePositionFromString(zone, config.position);
+      const position = zoneManager.computePositionFromString(zone, config.position);
       if (config.position === 'relative') {
         position.x += Number(config.x || 0);
         position.y += Number(config.y || 0);
@@ -33,7 +35,7 @@ characterPopIns = {
 
       config.x = position.x;
       config.y = position.y;
-    } else config.target = userManager.player;
+    } else config.target = userManager.getControlledCharacter();
 
     // allow zones to show iframe
     config.iframe = !!formatURL(zone.inlineURL);
@@ -41,18 +43,24 @@ characterPopIns = {
     this.createOrUpdate(`${Meteor.userId()}-${zone._id}`, zone.inlineURL, config);
   },
 
-  createOrUpdate(popInIdentifier, popInContent, config = {}) {
+  createPopIn(popInIdentifier, content, callback) {
+    const popIn = this.scene.add.dom().createFromHTML(content);
+    popIn.addListener('click');
+    popIn.on('click', event => {
+      if (event.target.classList.contains('toggle-full-screen')) popIn.node.classList.toggle('full-screen');
+      if (callback) callback(event);
+    });
+    this.popIns[popInIdentifier] = popIn;
+
+    return popIn;
+  },
+
+  createOrUpdate(popInIdentifier, popInContent, config = {}, callback = undefined) {
     const content = config.iframe ? this.createIframeFromURL(popInContent) : this.formatText(popInContent, config);
 
     let popIn = this.popIns[popInIdentifier];
-    if (!popIn) {
-      popIn = this.scene.add.dom().createFromHTML(content);
-      popIn.addListener('click');
-      popIn.on('click', event => {
-        if (!event.target.classList.contains('toggle-full-screen')) return;
-        popIn.node.classList.toggle('full-screen');
-      });
-    } else if (content !== popIn.node.innerHTML) popIn.setHTML(content);
+    if (!popIn) popIn = this.createPopIn(popInIdentifier, content, callback);
+    else if (content !== popIn.node.innerHTML) popIn.setHTML(content);
 
     const { style } = popIn.node;
     if (config.width) style.width = `${config.width}px`;
@@ -69,13 +77,11 @@ characterPopIns = {
     clearTimeout(popIn.autoCloseHandler);
     if (config.autoClose) popIn.autoCloseHandler = window.setTimeout(() => this.destroyPopIn(popInIdentifier), config.autoClose);
 
-    this.popIns[popInIdentifier] = popIn;
-
     return popIn;
   },
 
   createIframeFromURL(url) {
-    return `<div class="toggle-full-screen"></div><iframe loading="lazy" frameBorder="0" src="${url}" allow="accelerometer; autoplay; encrypted-media; gyroscope;"></iframe>`;
+    return `<div class="toggle-full-screen"></div><iframe loading="lazy" src="${url}" allow="accelerometer; autoplay; encrypted-media; gyroscope;"></iframe>`;
   },
 
   destroyPopIn(popInIdentifier) {
@@ -102,7 +108,7 @@ characterPopIns = {
     // parse urls
     if (options.parseURL) newText = formatURLs(text, true);
 
-    return `<p class="${options.classList}">${newText}</p>`;
+    return `<p class="${options.classList || ''}">${newText}</p>`;
   },
 
   setContent(popInIdentifier, content) {

@@ -1,3 +1,5 @@
+import { toggleUIInputs } from '../helpers';
+
 isModalOpen = template => {
   if (!template) return Session.get('modal');
   return Session.get('modal')?.template === template;
@@ -5,35 +7,41 @@ isModalOpen = template => {
 
 toggleModal = (modalName, classes = '') => {
   if (Session.get('modal')?.template === modalName) Session.set('modal', null);
-  else Session.set('modal', { template: modalName, classes });
+  else if (!Session.get('modal')) Session.set('modal', { template: modalName, classes });
 };
 
-closeModal = () => Session.set('modal', undefined);
+closeModal = () => {
+  if (!isModalOpen()) return;
+
+  Session.set('modal', undefined);
+  toggleUIInputs(false);
+};
 
 const keydownListener = e => {
   if (e.code !== 'Escape' || !Session.get('modal')) return;
 
   closeModal();
-  game.scene.keys.WorldScene.enableKeyboard(true, true);
   document.activeElement.blur();
 };
 
 let modals = [];
 
-Template.modalContainer.onCreated(() => {
+Template.modalContainer.onCreated(function () {
   closeModal();
   document.addEventListener('keydown', keydownListener);
 
-  Tracker.autorun(() => {
+  this.autorun(() => {
     const modal = Session.get('modal');
+    if (modal?.ignoreState) return;
 
     // allow multiple modals opened at the same time
     if (modal) modals.push(modal);
     else {
       const modalClosed = modals.pop();
+
       if (modalClosed && modalClosed.append) {
         const previousModal = modals[modals.length - 1];
-        if (previousModal) Session.set('modal', previousModal);
+        if (previousModal) Session.set('modal', { ...previousModal, ignoreState: true });
       } else modals = [];
     }
   });

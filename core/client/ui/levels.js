@@ -1,3 +1,5 @@
+import { isLevelOwner, teleportUserInLevel } from '../../lib/misc';
+
 const listMode = 'list';
 
 const levelQueryFilters = ignoredLevelId => ({
@@ -17,7 +19,7 @@ const askLoadLevel = (levelId, incrementVisit = false) => {
     const data = { userId: Meteor.userId(), levelId, type: 'load-level' };
     window.parent.document.dispatchEvent(new CustomEvent(eventTypes.onPopInEvent, { detail: data }));
   } else {
-    Meteor.users.update(Meteor.userId(), { $set: { 'profile.levelId': levelId } });
+    teleportUserInLevel(Meteor.user(), Levels.findOne(levelId), 'load-level');
   }
 };
 
@@ -56,9 +58,9 @@ Template.levels.events({
 });
 
 Template.levels.helpers({
-  isLevelOwner(level) { return Meteor.userId() === level.createdBy; },
+  isLevelOwner(level) { return isLevelOwner({ _id: Meteor.userId() }, level); },
   levels() {
-    const currentLevelId = Meteor.user()?.profile.levelId;
+    const currentLevelId = Meteor.user({ fields: { 'profile.levelId': 1 } })?.profile.levelId;
     const levels = Levels.find(levelQueryFilters(currentLevelId), { sort: { visit: -1 } }).fetch();
     const userId = Meteor.userId();
 
@@ -72,7 +74,7 @@ Template.levels.helpers({
   levelName(level) {
     if (level.name) return level.name;
 
-    const user = Meteor.users.findOne(level.createdBy);
+    const user = Meteor.users.findOne(level.createdBy, { fields: { 'profile.name': 1 } });
     if (!user && level.createdBy) return `${level.createdBy}'s world`;
     else if (!user) return `Guest's world`;
 
@@ -82,4 +84,12 @@ Template.levels.helpers({
   loading() { return Template.instance().loading.get(); },
   showList() { return Template.instance().tab.get() === listMode; },
   showCreate() { return Template.instance().tab.get() !== listMode; },
+  restrictedLevelCreation() {
+    const { permissions } = Meteor.settings.public;
+    if (!permissions) return false;
+
+    return !permissions.allowLevelCreation;
+  },
+  contactURL() { return Meteor.settings.public.permissions?.contactURL; },
+  allowCreateLevel() { return Meteor.settings.public.features?.createLevel?.enabled !== false; },
 });

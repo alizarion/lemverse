@@ -1,11 +1,13 @@
 import nipplejs from 'nipplejs';
 import Phaser from 'phaser';
 
-const zoomConfig = Object.freeze({
-  min: 0.6,
-  max: 1.6,
-  delta: 100,
-});
+import networkManager from '../network-manager';
+import URLOpener from '../url-opener';
+
+import { clamp, isMobile } from '../helpers';
+
+const fixedUpdateInterval = 200;
+const zoomConfig = Meteor.settings.public.zoom;
 
 const onZoneEntered = e => {
   const { zone } = e.detail;
@@ -14,7 +16,7 @@ const onZoneEntered = e => {
   if (targetedLevelId) levelManager.loadLevel(targetedLevelId);
   else if (inlineURL) characterPopIns.initFromZone(zone);
 
-  if (url) zones.openZoneURL(zone);
+  if (url) URLOpener.open(url, zone.fullscreen);
   if (disableCommunications) userManager.setUserInDoNotDisturbMode(true);
 };
 
@@ -26,7 +28,7 @@ const onZoneLeft = e => {
 
   if (url) {
     updateViewport(game.scene.keys.WorldScene, viewportModes.fullscreen);
-    zones.closeIframeElement();
+    URLOpener.close();
   }
   if (disableCommunications) userManager.setUserInDoNotDisturbMode(false);
 };
@@ -43,12 +45,10 @@ WorldScene = new Phaser.Class({
     this.nippleMoving = false;
     this.viewportMode = viewportModes.fullscreen;
     this.sleepMethod = this.sleep.bind(this);
-    this.updateViewportMethod = mode => {
-      updateViewport(this, mode);
-      levelManager.markCullingAsDirty();
-    };
+    this.resizeMethod = this.resize.bind(this);
     this.postUpdateMethod = this.postUpdate.bind(this);
     this.shutdownMethod = this.shutdown.bind(this);
+    this.fixedUpdateInterval = setInterval(() => this._fixedUpdate(), fixedUpdateInterval);
 
     // controls
     this.enableKeyboard(true, true);
@@ -70,19 +70,19 @@ WorldScene = new Phaser.Class({
     });
 
     // Notes: tilesets with extrusion are required to avoid potential black lines between tiles (see https://github.com/sporadic-labs/tile-extruder)
-    this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
-      const zoom = Math.min(Math.max(this.cameras.main.zoom + (deltaY / zoomConfig.delta), zoomConfig.min), zoomConfig.max);
-      this.cameras.main.setZoom(zoom);
-      levelManager.markCullingAsDirty();
+    this.input.on('wheel', (_pointer, _gameObjects, _deltaX, deltaY) => {
+      this.zoomDelta(deltaY);
     });
 
-    if (window.matchMedia('(pointer: coarse)').matches) {
+    if (isMobile()) {
       this.nippleManager = nipplejs.create({
         mode: 'dynamic',
+        zone: document.querySelector('#game'),
         catchDistance: 150,
+        dynamicPage: true,
       });
 
-      this.nippleManager.on('added', (evt, nipple) => {
+      this.nippleManager.on('added', (_event, nipple) => {
         nipple.on('start move end dir plain', (evt2, data) => {
           if (evt2.type === 'move') {
             this.nippleMoving = true;
@@ -98,8 +98,7 @@ WorldScene = new Phaser.Class({
     this.events.on('sleep', this.sleepMethod, this);
     this.events.on('postupdate', this.postUpdateMethod, this);
     this.events.once('shutdown', this.shutdownMethod, this);
-    this.scale.on('resize', this.updateViewportMethod, this);
-    hotkeys.setScope('guest');
+    this.scale.on('resize', this.resizeMethod, this);
 
     // custom events
     window.addEventListener(eventTypes.onZoneEntered, onZoneEntered);
@@ -110,24 +109,53 @@ WorldScene = new Phaser.Class({
     Session.set('sceneWorldReady', true);
     this.scene.setVisible(false);
     window.dispatchEvent(new CustomEvent(eventTypes.onWorldSceneCreated, { detail: { scene: this } }));
+
+    entityManager.init(this);
+    levelManager.init(this);
+    networkManager.init(this);
+    userManager.init(this);
+    zoneManager.init(this);
+  },
+
+  create() {
+    const pinchPlugin = this.plugins.get('rexpinchplugin').add(this);
+
+    // Disable joystick to avoid user moving while zooming
+    pinchPlugin.on('pinchstart', function () {
+      const nipple = this.nippleManager.get(this.nippleManager.ids[0]);
+      nipple.destroy();
+    }, this);
+
+    pinchPlugin.on('pinch', function (pinch) {
+      this.zoomDelta(-(pinch.scaleFactor - 1) * 100 * zoomConfig.pinchDelta);
+    }, this);
+  },
+
+  zoomDelta(delta) {
+    const linearFactor = this.cameras.main.zoom * zoomConfig.factor;
+    const clampedDelta = clamp(delta, -zoomConfig.maxDelta, zoomConfig.maxDelta);
+    const zoom = clamp(this.cameras.main.zoom - (clampedDelta * linearFactor), zoomConfig.min, zoomConfig.max);
+    this.setClampedZoom(this.cameras.main, zoom);
   },
 
   initFromLevel(level) {
-    entityManager.init(this);
-    levelManager.init(this);
-    userManager.init(this);
-    zones.init(this);
     levelManager.createMapFromLevel(level);
 
     // cameras
     this.cameras.main.setBounds(0, 0, levelManager.map.widthInPixels, levelManager.map.heightInPixels);
     this.cameras.main.setRoundPixels(true);
+    this.resetZoom();
     this.scene.setVisible(true);
+  },
+
+  _fixedUpdate() {
+    entityManager.fixedUpdate();
   },
 
   update() {
     levelManager.update();
     userManager.update();
+    networkManager.update();
   },
 
   postUpdate(time, delta) {
@@ -151,33 +179,46 @@ WorldScene = new Phaser.Class({
   },
 
   resetZoom() {
-    this.cameras.main.setZoom(zoomConfig.default);
-    levelManager.markCullingAsDirty();
+    this.setClampedZoom(this.cameras.main, zoomConfig.default);
+  },
+
+  resize() {
+    this.setClampedZoom(this.cameras.main, this.cameras.main.zoom);
+    updateViewport(this, this.viewportMode);
+  },
+
+  setClampedZoom(camera, zoom) {
+    const bounds = camera.getBounds();
+    const { height, width } = camera;
+
+    if (bounds.height * zoom < height || bounds.width * zoom < width) {
+      zoom = Math.max(height / bounds.height, width / bounds.width);
+    }
+    camera.setZoom(zoom);
   },
 
   sleep() {
-    entityManager.onSleep();
-    userManager.onSleep();
+    networkManager.onSleep();
   },
 
   shutdown() {
     this.nippleManager?.destroy();
 
+    clearInterval(this.fixedUpdateInterval);
     this.events.removeListener('postupdate');
     this.events.off('postupdate', this.postUpdateMethod, this);
     this.events.off('sleep', this.sleepMethod, this);
-    this.scale.off('resize', this.updateViewportMethod);
+    this.scale.off('resize', this.resizeMethod, this);
     window.removeEventListener(eventTypes.onZoneEntered, onZoneEntered);
     window.removeEventListener(eventTypes.onZoneLeft, onZoneLeft);
 
     levelManager.destroy();
     entityManager.destroy();
     userManager.destroy();
-    zones.destroy();
+    zoneManager.destroy();
     userProximitySensor.callProximityEndedForAllNearUsers();
     peer.closeAll();
 
-    Session.set('showScoreInterface', false);
     Session.set('sceneWorldReady', false);
   },
 });

@@ -1,3 +1,5 @@
+import { canEditActiveLevel, subscribedUsersToEntity } from '../lib/misc';
+
 const applyEntityState = (entity, stateActions) => {
   const { levelId } = entity;
 
@@ -35,7 +37,7 @@ spawnEntityFromPrefab = (entityId, options = {}) => {
 
 const spawnEntityFromFile = (fileId, options = {}) => {
   log('spawnEntityFromFile: start', { fileId, options });
-  check(fileId, String);
+  check(fileId, Match.SafeString);
   check(options, { x: Number, y: Number, levelId: String });
 
   const spawnedEntityId = Entities.insert({
@@ -61,8 +63,10 @@ const spawnEntityFromFile = (fileId, options = {}) => {
 
 switchEntityState = (entity, forcedState = undefined) => {
   check(forcedState, Match.Maybe(String));
+  check(entity._id, Match.Id);
   log('switchEntityState: start', { entity, forcedState });
-  if (!entity || !entity.states) throw new Error(`Entity without states`);
+
+  if (!entity.states) throw new Error(`Entity without states`);
 
   const toggledState = entity.state === 'on' ? 'off' : 'on';
   const newState = forcedState !== undefined ? forcedState : toggledState;
@@ -92,21 +96,58 @@ const pickEntityInventory = entity => {
   Entities.update(entity._id, { $set: { inventory: {} } });
 };
 
+const useEntity = (entityId, value = undefined) => {
+  check(value, Match.OneOf(undefined, null, Number, String));
+  check(entityId, Match.Id);
+
+  log('useEntity: start', { userId: this.userId, entityId, value });
+
+  const entity = Entities.findOne(entityId);
+  if (!entity) throw new Meteor.Error(404, 'Entity not found.');
+
+  if (entity.actionType === entityActionType.pickable) {
+    pickEntityInventory(entity);
+    Entities.remove(entity._id);
+  } else if (entity.actionType === entityActionType.actionable) {
+    if (entity.entityId) {
+      if (entity.entityId === entityId) throw new Error('The entity is linked to itself');
+      useEntity(entity.entityId, value);
+    }
+
+    if (entity.states) switchEntityState(entity, value);
+  } else if (entity.actionType === entityActionType.none && entity.states) switchEntityState(entity, value);
+  else throw new Error('entity action not implemented');
+
+  log('useEntity: done', { userId: this.userId, entityId, value });
+
+  return entity;
+};
+
 Meteor.methods({
   useEntity(entityId, value = undefined) {
     check(value, Match.OneOf(undefined, null, Number, String));
     check(entityId, Match.Id);
+    return useEntity(entityId, value);
+  },
+  updateEntityTarget(entityId, targetEntityId) {
+    check(entityId, Match.Id);
+    check(targetEntityId, Match.OneOf(undefined, null, String));
+
+    log('updateEntityTarget: start', { userId: this.userId, entityId, targetEntityId });
 
     const entity = Entities.findOne(entityId);
     if (!entity) throw new Meteor.Error(404, 'Entity not found.');
 
-    if (!entity.actionType || entity.actionType === entityActionType.actionable) switchEntityState(entity, value);
-    else if (entity.actionType === entityActionType.pickable) {
-      pickEntityInventory(entity);
-      Entities.remove(entity._id);
-    } else throw new Error('entity action not implemented');
+    if (!canEditActiveLevel(Meteor.user())) throw new Meteor.Error('permission-error', `You can't edit this level`);
 
-    return entity;
+    // unlink the target
+    if (!targetEntityId) Entities.update(entityId, { $unset: { entityId: 1 } });
+    else {
+      check(targetEntityId, Match.Id);
+      Entities.update(entityId, { $set: { entityId: targetEntityId } });
+    }
+
+    log('updateEntityTarget: done', { userId: this.userId, entityId, targetEntityId });
   },
   subscribedUsers(entityId) {
     check(entityId, Match.Id);
@@ -114,7 +155,7 @@ Meteor.methods({
     return subscribedUsersToEntity(entityId);
   },
   spawnEntityFromFile(fileId, options = {}) {
-    check(fileId, Match.Id);
+    check(fileId, Match.SafeString);
     check(options, { x: Match.Optional(Number), y: Match.Optional(Number) });
     if (!lp.isLemverseBeta('custom-sprite')) throw new Meteor.Error('invalid-user', 'available for admin only for now');
     if (!this.userId) return undefined;

@@ -1,3 +1,6 @@
+import { meteorCallWithPromise } from '../../../client/helpers';
+import { canSubscribeToNotifications } from '../misc';
+
 const messageMaxLength = 4096;
 
 const ignoreChannelAutoSwitch = () => !Session.get('console') || (Session.get('messagesChannel') || '').includes('qst_');
@@ -31,30 +34,14 @@ messagesModule = {
       this.lastZoneEntered = undefined;
     };
 
-    const onUserNear = () => {
-      if (ignoreChannelAutoSwitch()) return;
-
-      this.changeMessagesChannel(nearUserIdsToString());
-    };
-
-    const onUserMovedAway = () => {
-      if (ignoreChannelAutoSwitch()) return;
-
-      const channel = nearUserIdsToString();
-      if (!channel.length && this.lastZoneEntered) this.changeMessagesChannel(this.lastZoneEntered);
-      else if (channel.length) this.changeMessagesChannel(channel);
-      else this.stopListeningMessagesChannel();
-    };
-
     window.addEventListener(eventTypes.onZoneEntered, onZoneEntered);
     window.addEventListener(eventTypes.onZoneLeft, onZoneLeft);
-    window.addEventListener(eventTypes.onUserNear, onUserNear);
-    window.addEventListener(eventTypes.onUserMovedAway, onUserMovedAway);
   },
 
   autoSelectChannel() {
     if (userProximitySensor.isNearSomeone()) this.changeMessagesChannel(nearUserIdsToString());
-    else if (zones.activeZone) this.changeMessagesChannel(zones.activeZone._id);
+    else if (zoneManager.activeZone) this.changeMessagesChannel(zoneManager.activeZone._id);
+    else this.changeMessagesChannel(Meteor.user().profile.levelId);
   },
 
   changeMessagesChannel(channel) {
@@ -68,10 +55,10 @@ messagesModule = {
   },
 
   markChannelAsRead(channel) {
-    if (channel.includes('zon_')) {
-      Meteor.call('updateZoneLastSeenDate', channel, () => {
+    if (canSubscribeToNotifications(channel)) {
+      Meteor.call('messagesUpdateChannelLastSeenDate', channel, () => {
         const zone = Zones.findOne(channel);
-        if (zone) zones.destroyNewContentIndicator(zone);
+        if (zone) zoneManager.destroyNewContentIndicator(zone);
       });
     } else if (channel.includes('qst_')) {
       const notification = Notifications.findOne({ $or: [{ questId: channel }, { channelId: channel }], userId: Meteor.userId() });
@@ -82,15 +69,20 @@ messagesModule = {
   async sendWebRTCMessage(channel, content) {
     try {
       let showPopInOverEmitter = true;
-      if (channel.includes('zon_')) await sendDataToUsersInZone('text', content, Meteor.userId());
-      else {
+      if (channel.includes('zon_')) {
+        // only show the pop-in over the character when the targeted channel is the active zone
+        const zone = zoneManager.currentZone(Meteor.user());
+        if (!zone || zone._id !== channel) return;
+
+        await sendDataToUsersInZone('text', { content, channel }, Meteor.userId());
+      } else {
         const userIds = userProximitySensor.filterNearUsers(channel.split(';'));
         showPopInOverEmitter = !!userIds.length;
-        await sendDataToUsers('text', content, Meteor.userId(), userIds);
+        await sendDataToUsers('text', { content, channel }, Meteor.userId(), userIds);
       }
 
       // simulate a message from himself to show a pop-in over user's head
-      if (showPopInOverEmitter) userManager.onPeerDataReceived({ emitter: Meteor.userId(), data: content, type: 'text' });
+      if (showPopInOverEmitter) userManager.onPeerDataReceived({ emitter: Meteor.userId(), data: { content, channel }, type: 'text' });
     } catch (err) {
       if (err.message !== 'no-targets') lp.notif.error(err);
     }
@@ -105,7 +97,7 @@ messagesModule = {
 
     let messageId;
     try {
-      messageId = await meteorCall('sendMessage', channel, content, file?._id);
+      messageId = await meteorCallWithPromise('sendMessage', channel, content, file?._id);
     } catch (err) {
       lp.notif.error('You are not authorized to speak here');
     }

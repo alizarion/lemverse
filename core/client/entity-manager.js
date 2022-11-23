@@ -1,4 +1,5 @@
-import Phaser from 'phaser';
+import { guestAllowed, permissionTypes } from '../lib/misc';
+import URLOpener from './url-opener';
 
 const entityAnimations = {
   spawn: (sprite, scene) => {
@@ -10,7 +11,7 @@ const entityAnimations = {
       scaleY: { value: 1, duration: 300, ease: 'Bounce.easeOut' },
     });
   },
-  floating: (x, y) => ({
+  floating: (_x, y) => ({
     y: { value: y, duration: 1300, ease: 'Sine.easeIn', yoyo: true, repeat: -1 },
   }),
   picked: (x, y) => ({
@@ -30,22 +31,6 @@ const entityTooltipConfig = {
   style: 'tooltip with-arrow fade-in',
 };
 
-const entityInteractionConfiguration = {
-  hitArea: new Phaser.Geom.Circle(0, 0, 20),
-  hitAreaCallback: Phaser.Geom.Circle.Contains,
-  cursor: 'pointer',
-  draggable: true,
-};
-
-const onDrag = function (pointer, dragX, dragY) {
-  this.x = dragX;
-  this.y = dragY;
-  this.setDepth(this.y);
-};
-
-const onDragEnd = function () { Entities.update(this.getData('id'), { $set: { x: this.x, y: this.y } }); };
-const onPointerDown = function () { Session.set('selectedEntityId', this.getData('id')); };
-
 const entityCreatedThreshold = 1000; // In ms
 const floatingDistance = 20;
 const itemAddedToInventoryText = 'Item added to your inventory';
@@ -53,7 +38,9 @@ const itemAlreadyPickedText = 'Someone just picked up this item 😢';
 
 entityManager = {
   scene: undefined,
+  entityInUse: undefined,
   previousNearestEntity: undefined,
+  shouldCheckNearestEntity: false,
   entities: {},
 
   init(scene) {
@@ -61,12 +48,10 @@ entityManager = {
   },
 
   destroy() {
-    this.onSleep();
     this.entities = {};
     this.previousNearestEntity = undefined;
+    this.stopInteracting();
   },
-
-  onSleep() { },
 
   onDocumentAdded(entity) {
     this.spawnEntities([entity]);
@@ -78,6 +63,7 @@ entityManager = {
 
     entityInstance.destroy();
     delete this.entities[entity._id];
+    window.dispatchEvent(new CustomEvent(eventTypes.onEntityRemoved, { detail: { entity } }));
   },
 
   onDocumentUpdated(newEntity, oldEntity) {
@@ -88,8 +74,9 @@ entityManager = {
     if (gameObject) {
       entityInstance
         .setPosition(newEntity.x, newEntity.y)
-        .setDepth(gameObject.depth || newEntity.y)
         .setScale(gameObject.scale || 1, Math.abs(gameObject.scale || 1));
+
+      entityInstance.setData('customDepth', gameObject.depth);
     }
 
     if (newEntity.state !== oldEntity.state) this.updateEntityFromState(newEntity, newEntity.state);
@@ -110,11 +97,14 @@ entityManager = {
       if (sprite) {
         const color = state.sprite.tint || 0xffffff;
         sprite.setTint(color, color, color, color);
+      }
+    }
 
-        if (state.sprite.animation) {
-          if (state.sprite.animation === 'pause') sprite.anims.pause();
-          else sprite.anims.resume();
-        }
+    if (state.animation) {
+      const sprite = entityInstance.getByName('main-sprite');
+      if (sprite) {
+        const fullAnimationKey = `${entity.gameObject.sprite.key}-${state.animation}`;
+        sprite.play(fullAnimationKey);
       }
     }
 
@@ -127,58 +117,95 @@ entityManager = {
       }
     }
 
+    if (state.collider && entityInstance.body) {
+      entityInstance.body.enable = state.collider.enable ?? entityInstance.body.enable;
+    }
+
     return true;
   },
 
-  onInteraction(tiles, interactionPosition) {
+  interactWithNearestEntity() {
     if (!this.previousNearestEntity || this.previousNearestEntity.actionType === entityActionType.none) return;
 
-    const user = Meteor.user();
-    if (user.profile.guest) return;
-    if (!this.allowedToUseEntity(user, this.previousNearestEntity)) {
-      lp.notif.error('You are not allowed to use this item.');
+    if (!this.allowedToUseEntity(this.previousNearestEntity)) {
+      lp.notif.error('Action not allowed.');
       return;
     }
 
     if (this.previousNearestEntity.actionType === entityActionType.pickable) {
-      const previousNearestEntityId = this.previousNearestEntity._id;
-      const animation = entityAnimations.picked(user.profile.x, user.profile.y - 30);
-      this.scene.tweens.add({
-        targets: this.entities[previousNearestEntityId],
-        ...animation,
-        onComplete: () => {
-          Meteor.call('useEntity', previousNearestEntityId, error => {
-            if (error) { lp.notif.error(itemAlreadyPickedText); return; }
-
-            lp.notif.success(itemAddedToInventoryText);
-            this.handleNearestEntityTooltip(userManager.player);
-          });
-        },
-      });
-
+      this.pickEntity(this.previousNearestEntity);
       return;
     }
 
     if (this.previousNearestEntity.action) {
-      const [action, value] = this.previousNearestEntity.action.split(':');
+      if (this.entityInUse && this.entityInUse === this.previousNearestEntity) return;
+
+      const [action, value] = this.previousNearestEntity.action.split(/:(.*)/s);
+      if (!value) {
+        lp.notif.warning('Invalid entity, please contact the level owner to fix it');
+        return;
+      }
+
+      this.entityInUse = this.previousNearestEntity;
+      window.dispatchEvent(new CustomEvent(eventTypes.onEntityInteractionStarted, { detail: { entity: this.entityInUse, action, value } }));
+
       if (action === 'modal') Session.set('modal', { template: value, entity: this.previousNearestEntity });
+      else if (action === 'url') URLOpener.open(value);
+
+      return;
     }
 
-    Entities.find().fetch().forEach(entity => {
-      if (entity.states && this.isEntityTriggered(entity, interactionPosition)) Meteor.call('useEntity', entity._id);
+    Meteor.call('useEntity', this.previousNearestEntity.entityId || this.previousNearestEntity._id, error => {
+      if (error) lp.notif.error('Unable to use this for now');
     });
   },
 
-  allowedToUseEntity(user, entity) {
+  allowedToUseEntity(entity) {
+    const user = Meteor.user();
+    if (user.profile.guest && !guestAllowed(permissionTypes.useEntity)) return false;
+
     if (!entity.requiredItems?.length) return true;
 
     const userItems = Object.keys(user.inventory || {});
     return entity.requiredItems.every(item => userItems.includes(item));
   },
 
+  pickEntity(entity) {
+    const { _id } = entity;
+
+    const user = Meteor.user();
+    const animation = entityAnimations.picked(user.profile.x, user.profile.y - 30);
+    this.scene.tweens.add({
+      targets: this.entities[_id],
+      ...animation,
+      onComplete: () => {
+        Meteor.call('useEntity', _id, error => {
+          if (error) { lp.notif.error(itemAlreadyPickedText); return; }
+
+          lp.notif.success(itemAddedToInventoryText);
+          this.handleNearestEntityTooltip(userManager.getControlledCharacter());
+        });
+      },
+    });
+  },
+
   postUpdate() {
-    const { player, playerWasMoving } = userManager;
-    if (player && playerWasMoving && !Meteor.user().profile.guest) this.handleNearestEntityTooltip(player);
+    if (userManager.controlledCharacter?.wasMoving) this.shouldCheckNearestEntity = true;
+  },
+
+  fixedUpdate() {
+    const { controlledCharacter } = userManager;
+    if (!controlledCharacter) return;
+
+    if (this.shouldCheckNearestEntity) {
+      this.handleNearestEntityTooltip(controlledCharacter);
+      this.shouldCheckNearestEntity = false;
+    }
+
+    Object.values(this.entities).forEach(entity => {
+      const customDepth = entity.getData('customDepth');
+      entity.setDepth(customDepth ?? entity.y);
+    });
   },
 
   handleNearestEntityTooltip(position) {
@@ -227,16 +254,12 @@ entityManager = {
     return (position.x - entity.x) ** 2 + (position.y - entity.y) ** 2;
   },
 
-  isEntityTriggered(entity, position) {
-    const area = entity.triggerArea;
-    if (!area) return false;
+  stopInteracting() {
+    if (!this.entityInUse) return;
 
-    if (position.x < entity.x + area.x) return false;
-    if (position.x > entity.x + area.x + area.w) return false;
-    if (position.y < entity.y + area.y) return false;
-    if (position.y > entity.y + area.y + area.h) return false;
-
-    return true;
+    URLOpener.close();
+    window.dispatchEvent(new CustomEvent(eventTypes.onEntityInteractionStopped, { detail: { entity: this.entityInUse } }));
+    this.entityInUse = undefined;
   },
 
   tooltipTextFromActionType(actionType) {
@@ -245,6 +268,59 @@ entityManager = {
     if (actionType === entityActionType.pickable) return 'Press the key <b>u</b> to pick';
 
     throw new Error('entity action not implemented');
+  },
+
+  entityToGameObject(entity) {
+    const gameObject = this.scene.add.container(entity.x, entity.y)
+      .setData('id', entity._id)
+      .setData('actionType', entity.actionType)
+      .setData('customDepth', entity.gameObject?.depth)
+      .setScale(entity.gameObject?.scale || 1);
+
+    this.entities[entity._id] = gameObject;
+
+    if (!entity.gameObject) return undefined;
+
+    let mainSprite;
+    const { collider, sprite, animations, text } = entity.gameObject;
+    if (sprite) {
+      mainSprite = this.spawnSpriteFromConfig(sprite);
+      gameObject.add(mainSprite);
+
+      if (animations) this.createAnimationsFromConfig(sprite, animations);
+    }
+
+    // configuration: https://rexrainbow.github.io/phaser3-rex-notes/docs/site/bitmaptext/
+    if (text) gameObject.add(this.spawnTextFromConfig(text, entity.state));
+
+    // configuration: https://rexrainbow.github.io/phaser3-rex-notes/docs/site/arcade-body/
+    if (collider) this.spawnColliderFromConfig(gameObject, collider);
+
+    // pickable/loots animations
+    const pickable = entity.actionType === entityActionType.pickable;
+    if (pickable && mainSprite) {
+      const animation = entityAnimations.floating(0, -floatingDistance);
+      this.scene.tweens.add({
+        targets: mainSprite,
+        ...animation,
+        onUpdate: () => gameObject.setDepth(gameObject.y + floatingDistance),
+      });
+
+      const shadow = createFakeShadow(this.scene, 0, floatingDistance, 0.3, 0.15);
+      gameObject.add(shadow);
+
+      this.scene.tweens.add({
+        targets: shadow,
+        scaleX: { value: 0.25, duration: 1300, ease: 'Sine.easeIn', yoyo: true, repeat: -1 },
+        scaleY: { value: 0.1, duration: 1300, ease: 'Sine.easeIn', yoyo: true, repeat: -1 },
+      });
+
+      mainSprite.setOrigin(0.5, 1);
+    } else if (mainSprite && this.isEntityRecentlyCreated(entity)) {
+      entityAnimations.spawn(mainSprite, this.scene);
+    }
+
+    return gameObject;
   },
 
   spawnEntities(entities, callback) {
@@ -258,60 +334,52 @@ entityManager = {
         // the spawn being asynchronous, an entity may have disappeared before being created
         if (!Entities.findOne(entity._id)) return;
 
-        const gameObject = this.scene.add.container(entity.x, entity.y)
-          .setData('id', entity._id)
-          .setData('actionType', entity.actionType)
-          .setDepth(entity.gameObject?.depth || entity.y)
-          .setScale(entity.gameObject?.scale || 1)
-          .on('pointerdown', onPointerDown)
-          .on('drag', onDrag)
-          .on('dragend', onDragEnd);
-
-        this.entities[entity._id] = gameObject;
-
-        if (!entity.gameObject) return;
-
-        let mainSprite;
-        const { collide, sprite, text } = entity.gameObject;
-        if (sprite) {
-          mainSprite = this.spawnSpriteFromConfig(sprite);
-          gameObject.add(mainSprite);
-        }
-        if (text) gameObject.add(this.spawnTextFromConfig(text, entity.state));
-        if (collide) this.scene.physics.world.enableBody(gameObject);
-
-        // pickable/loots animations
-        const pickable = entity.actionType === entityActionType.pickable;
-        if (pickable && mainSprite) {
-          const animation = entityAnimations.floating(0, -floatingDistance);
-          this.scene.tweens.add({
-            targets: mainSprite,
-            ...animation,
-            onUpdate: () => gameObject.setDepth(gameObject.y + floatingDistance),
-          });
-
-          const shadow = createFakeShadow(this.scene, 0, floatingDistance, 0.3, 0.15);
-          gameObject.add(shadow);
-
-          this.scene.tweens.add({
-            targets: shadow,
-            scaleX: { value: 0.25, duration: 1300, ease: 'Sine.easeIn', yoyo: true, repeat: -1 },
-            scaleY: { value: 0.1, duration: 1300, ease: 'Sine.easeIn', yoyo: true, repeat: -1 },
-          });
-
-          mainSprite.setOrigin(0.5, 1);
-        } else if (mainSprite && this.entityRecentlyCreated(entity)) {
-          entityAnimations.spawn(mainSprite, this.scene);
-        }
+        const gameObject = this.entityToGameObject(entity);
 
         this.updateEntityFromState(entity, entity.state);
+        window.dispatchEvent(new CustomEvent(eventTypes.onEntityAdded, { detail: { entity, gameObject } }));
       });
-
-      // ensures spawned entities are editable if the entity editor is open
-      if (Session.get('editor', 0) && Session.get('editorSelectedMenu') === editorModes.entities) this.enableEdition(true);
 
       if (callback) callback();
     });
+  },
+
+  createAnimationsFromConfig(sprite, config) {
+    Object.entries(config).forEach(([key, animConfig]) => {
+      this.scene.anims.create({
+        key: `${sprite.key}-${key}`,
+        frames: this.scene.anims.generateFrameNames(sprite.key, { ...animConfig }),
+        frameRate: animConfig.framerate || 16,
+        repeat: animConfig.repeat,
+      });
+    });
+  },
+
+  spawnColliderFromConfig(gameObject, config) {
+    this.scene.physics.add.existing(gameObject);
+
+    const { body } = gameObject;
+    const { radius, width, height, x, y, immovable, bounce, dragX, dragY, damping, worldBounds, collideTilemap } = config;
+
+    if (radius) body.setCircle(radius);
+    else body.setSize(width || 1, height || 1);
+
+    body.immovable = immovable ?? true;
+    body.setOffset(x || 0, y || 0);
+    body.setBounce(bounce || 0.1);
+    body.setAllowDrag();
+    body.setDragX(dragX || 0.15);
+    body.setDragY(dragY || 0.15);
+    body.useDamping = damping ?? true;
+    body.collideWorldBounds = true;
+    body.allowGravity = worldBounds || false;
+    body.enable = true;
+
+    if (collideTilemap) {
+      levelManager.layers.forEach(layer => this.scene.physics.add.collider(gameObject, layer));
+    }
+
+    this.scene.physics.add.collider(userManager.getControlledCharacter(), gameObject);
   },
 
   spawnSpriteFromConfig(config) {
@@ -320,6 +388,8 @@ entityManager = {
     if (config.assetId) sprite = this.scene.add.sprite(0, 0, config.assetId, config.key);
     else sprite = this.scene.add.sprite(0, 0, config.key);
     sprite.name = 'main-sprite';
+    sprite.y = config.y || 0;
+    sprite.setOrigin(0.5, 1);
 
     // animations
     if (!config.framerate) return sprite;
@@ -330,7 +400,7 @@ entityManager = {
       frameRate: config.framerate || 16,
     });
 
-    if (animation.frames.length) sprite.play({ key: config.key, repeat: -1 });
+    if (animation.frames.length) sprite.play({ key: config.key, repeat: config.repeat ?? -1 });
 
     return sprite;
   },
@@ -357,15 +427,7 @@ entityManager = {
     return { x: 0, y: -(mainSprite.displayHeight + (pickable ? floatingDistance : 0)) };
   },
 
-  enableEdition(value) {
-    let func;
-    if (value) func = key => this.entities[key].setInteractive(entityInteractionConfiguration);
-    else func = key => this.entities[key].disableInteractive();
-
-    Object.keys(this.entities).forEach(func);
-  },
-
-  entityRecentlyCreated(entity) {
+  isEntityRecentlyCreated(entity) {
     return Date.now() - entity.createdAt.getTime() <= entityCreatedThreshold;
   },
 };

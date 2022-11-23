@@ -1,5 +1,9 @@
-// Meteor Collections
+import { canEditActiveLevel } from './lib/misc';
+import fileSystemAdapter from './lib/file-storage';
 
+const canEditLevelContent = userId => canEditActiveLevel(Meteor.users.findOne(userId));
+
+// Meteor Collections
 Assets = lp.collectionRegister('assets', 'ast', [], {
   insert(userId) { return Meteor.users.findOne(userId)?.roles?.admin; },
   update(userId) { return Meteor.users.findOne(userId)?.roles?.admin; },
@@ -19,33 +23,27 @@ Characters = lp.collectionRegister('characters', 'chr', [], {
 });
 
 Tiles = lp.collectionRegister('tiles', 'til', [], {
-  insert(userId) { return isEditionAllowed(userId); },
-  update(userId) { return isEditionAllowed(userId); },
-  remove(userId) { return isEditionAllowed(userId); },
+  insert(userId) { return canEditLevelContent(userId); },
+  update(userId) { return canEditLevelContent(userId); },
+  remove(userId) { return canEditLevelContent(userId); },
 });
 
 Zones = lp.collectionRegister('zones', 'zon', [], {
-  insert(userId) { return isEditionAllowed(userId); },
-  update(userId) { return isEditionAllowed(userId); },
-  remove(userId) { return isEditionAllowed(userId); },
+  insert(userId) { return canEditLevelContent(userId); },
+  update(userId) { return canEditLevelContent(userId); },
+  remove(userId) { return canEditLevelContent(userId); },
 });
 
 Levels = lp.collectionRegister('levels', 'lvl', [], {
   insert(userId) { return Meteor.users.findOne(userId)?.roles?.admin; },
-  update(userId) { return isEditionAllowed(userId); },
+  update(userId) { return canEditLevelContent(userId); },
   remove(userId) { return Meteor.users.findOne(userId)?.roles?.admin; },
 });
 
-Notifications = lp.collectionRegister('notifications', 'not', [], {
-  insert(userId) { return Meteor.users.findOne(userId)?.roles?.admin; },
-  update(userId, notification) { return notification.userId === userId; },
-  remove(userId, notification) { return notification.userId === userId; },
-});
-
 Entities = lp.collectionRegister('entities', 'ent', [], {
-  insert(userId) { return isEditionAllowed(userId); },
-  update(userId) { return isEditionAllowed(userId); },
-  remove(userId) { return isEditionAllowed(userId); },
+  insert(userId) { return canEditLevelContent(userId); },
+  update(userId) { return canEditLevelContent(userId); },
+  remove(userId) { return canEditLevelContent(userId); },
 });
 
 Guilds = lp.collectionRegister('guilds', 'gui', [], {
@@ -54,12 +52,4 @@ Guilds = lp.collectionRegister('guilds', 'gui', [], {
   remove(userId) { return Meteor.users.findOne(userId)?.roles?.admin; },
 });
 
-Files = new FilesCollection({
-  collectionName: 'Files',
-  storagePath: Meteor.settings.public.files.storagePath,
-  downloadRoute: Meteor.settings.public.files.route,
-  public: true,
-  allowClientCode: false,
-  // debug: true,
-  onBeforeUpload(file) { return fileOnBeforeUpload(file, file.mime); },
-});
+Files = fileSystemAdapter();

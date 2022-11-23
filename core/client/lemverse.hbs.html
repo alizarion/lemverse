@@ -1,37 +1,52 @@
 <template name="lemverse">
-  <div class="lemverse">
-    <div class="simulation {{#if neq (Session 'editor') 0}}edit{{/if}}">
-      {{#if guest}}
-        {{> formAccount visible=loading}}
-      {{else}}
-        {{#if neq (Session 'editor') 0}}
-          {{> editToolbox}}
-        {{/if}}
-        <div class="js-streams">
-          {{#each remoteUser in allRemoteStreamsByUsers}}
-            {{> remoteStream remoteUser=remoteUser }}
-          {{/each}}
-        </div>
+  <div class="lemverse {{#if neq (Session 'editor') 0}}edit{{/if}} {{#if loading}}loading{{/if}}">
+    <div class="simulation">
+      <div id="game"></div>
+      <div id="gameModules">
+        {{#unless guest}}
+          {{> radialMenu }}
+        {{/unless}}
+        {{#each gameModule in gameModules}}
+          {{> Template.dynamic template=gameModule}}
+        {{/each}}
         {{> userPanel loading=loading}}
-        <button type="button" class="button js-notifications {{#if pendingNotificationsCount}}visible{{/if}}" data-count="{{ pendingNotificationsCount }}">🔔</button>
-      {{/if}}
-      <div id="game" class="{{#if neq (Session 'editor') 0}}edit{{/if}} {{#if loading}}loading{{/if}}"></div>
-    </div>
-    <div id="meet"></div>
-    <div id="webpage">
-      <iframe src="" frameBorder="0" allowfullscreen="true" id="webpageIframe" title="Embedded content"></iframe>
-    </div>
-  </div>
-  {{> zoneNameToaster}}
-  {{> modalContainer }}
+      </div>
 
-  {{#unless guest}}
-    {{> radialMenu }}
-  {{/unless}}
+      <div id="meet"></div>
+      <div id="webpage">
+        <iframe src="" allowfullscreen="true" id="webpageIframe" title="Embedded content"></iframe>
+      </div>
+    </div>
 
-  <div class="modules">
-    {{#each module in modules}}
-      {{> Template.dynamic template=module}}
+    {{#if and (and guest (not onboarding)) allowFormLogin}}
+      {{> formAccount visible=loading}}
+    {{else if onboarding}}
+      {{> userOnboarding}}
+    {{else if and (not guest not onboarding)}}
+      {{> editToolbox}}
+    {{/if}}
+
+    <div class="js-streams">
+      {{#each remoteUser in allRemoteStreamsByUsers}}
+      {{> remoteStream remoteUser=remoteUser }}
+      {{/each}}
+    </div>
+
+    {{> zoneNameToaster}}
+    {{#if displayNotificationButton}}
+      {{> notificationButton}}
+    {{/if}}
+
+    {{#each mainModule in mainModules}}
+      {{> Template.dynamic template=mainModule}}
     {{/each}}
+
+    {{> modalContainer }}
+
+    <div class="modules">
+      {{#each module in modules}}
+      {{> Template.dynamic template=module}}
+      {{/each}}
+    </div>
   </div>
 </template>

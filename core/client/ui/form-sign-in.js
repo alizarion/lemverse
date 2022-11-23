@@ -1,6 +1,8 @@
+import { toggleUIInputs } from '../helpers';
+
 const checkEmail = value => {
   if (!value) return 'Who are you mister anonymous? 🤔';
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Invalid email';
+  if (!/^[a-zA-Z0-9.!#$%&’*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/.test(value)) return 'Invalid email';
 
   return true;
 };
@@ -15,6 +17,24 @@ const checkPassword = value => {
   return true;
 };
 
+const nextStep = template => {
+  const step = template.step.get();
+  if (Meteor.settings.public.passwordless && step === 2) {
+    template.step.set(4);
+  } else {
+    template.step.set(step + 1);
+  }
+};
+
+const previousStep = template => {
+  const step = template.step.get();
+  if (Meteor.settings.public.passwordless && step === 4) {
+    template.step.set(2);
+  } else {
+    template.step.set(step - 1);
+  }
+};
+
 const onSubmit = template => {
   const step = template.step.get();
 
@@ -26,12 +46,13 @@ const onSubmit = template => {
   if (checkedResult !== true) { lp.notif.error(checkedResult); return; }
 
   if (step < 4) {
-    template.step.set(step + 1);
+    nextStep(template);
 
     // auto-focus first input on each step
     Tracker.afterFlush(() => document.querySelector('.form-account form input')?.focus());
   } else {
-    Meteor.call('convertGuestAccountToRealAccount', template.email, template.nickname, template.password, err => {
+    const source = FlowRouter.getRouteName() === 'invite' ? 'invite' : 'self';
+    Meteor.call('convertGuestAccountToRealAccount', template.email, template.nickname, template.password, source, err => {
       if (err) {
         lp.notif.error(err.reason);
         template.step.set(2); // go back to the first step with a field
@@ -39,7 +60,7 @@ const onSubmit = template => {
         return;
       }
 
-      hotkeys.setScope(scopes.player);
+      toggleUIInputs(false);
     });
   }
 };
@@ -47,15 +68,13 @@ const onSubmit = template => {
 Template.formSignIn.onCreated(function () {
   this.step = new ReactiveVar(1);
   this.email = undefined;
-  this.password = undefined;
+  this.password = Meteor.settings.public.passwordless ? '' : undefined;
   this.nickname = undefined;
 });
 
 Template.formSignIn.events({
   'click .js-next-step'() { onSubmit(Template.instance()); },
-  'focus input'() { hotkeys.setScope('form'); game?.scene?.keys?.WorldScene?.enableKeyboard(false, false); },
-  'blur input'() { hotkeys.setScope(scopes.player); game?.scene?.keys?.WorldScene?.enableKeyboard(true, false); },
-  'click .js-previous-step'() { Template.instance().step.set(Template.instance().step.get() - 1); },
+  'click .js-previous-step'() { previousStep(Template.instance()); },
   'keyup .js-email'(event, templateInstance) { templateInstance.email = event.target.value; },
   'keyup .js-password'(event, templateInstance) { templateInstance.password = event.target.value; },
   'keyup .js-nickname'(event, templateInstance) { templateInstance.nickname = event.target.value; },
@@ -73,7 +92,4 @@ Template.formSignIn.helpers({
   nickname() { return Template.instance().nickname; },
   password() { return Template.instance().password; },
   getStep() { return Template.instance().step.get(); },
-  termsLink() { return Meteor.settings.public.tos.terms; },
-  cookiesLink() { return Meteor.settings.public.tos.cookies; },
-  privacyLink() { return Meteor.settings.public.tos.privacy; },
 });

@@ -1,3 +1,5 @@
+import { moduleType } from '../../../client/helpers';
+
 const dropItemDistance = 45;
 
 window.addEventListener('load', () => {
@@ -17,7 +19,10 @@ window.addEventListener('load', () => {
     if (!user || !user.guildId) return;
 
     Tracker.nonreactive(() => {
-      registerRadialMenuModules([{ id: 'open-inventory', icon: '📦', shortcut: 73, label: 'Inventory', closeMenu: true, scope: 'me' }]);
+      registerModules(
+        [{ id: 'open-inventory', icon: '📦', shortcut: 73, label: 'Inventory', closeMenu: true, scope: 'me' }],
+        moduleType.RADIAL_MENU,
+      );
     });
   });
 });
@@ -36,7 +41,7 @@ Template.inventoryItemPanel.events({
     event.stopPropagation();
 
     const itemId = Session.get('selectedInventoryItem')._id;
-    const positionInFrontOfPlayer = userManager.getPositionInFrontOfPlayer(userManager.player, dropItemDistance);
+    const positionInFrontOfPlayer = userManager.getPositionInFrontOfCharacter(userManager.getControlledCharacter(), dropItemDistance);
     Meteor.call('dropInventoryItem', itemId, positionInFrontOfPlayer, (error, editedItems) => {
       if (error) { lp.notif.error('An error occured during the drop'); return; }
       if (!editedItems[itemId]) Session.set('selectedInventoryItem', undefined);

@@ -1,0 +1,13 @@
+.level-toolbox {
+  padding: 0 15px;
+  display: flex;
+  flex-direction: column;
+  color: white;
+
+  .label-option {
+    display: flex;
+    align-items: center;
+    font-size: 0.85rem;
+    margin: 15px 0;
+  }
+}

@@ -1,3 +1,11 @@
+import { nearestDuration, filesURL } from '../helpers';
+
+document.title = Meteor.settings.public.lp.product;
+document.getElementById('favicon').setAttribute('href', `${filesURL}favicon.png`);
+document.getElementById('favicon-16').setAttribute('href', `${filesURL}favicon16x16.png`);
+document.getElementById('favicon-32').setAttribute('href', `${filesURL}favicon32x32.png`);
+document.getElementById('apple-touch-icon').setAttribute('href', `${filesURL}appletouchicon.png`);
+
 Session.setDefault('retryTimeDuration', 0);
 const updateRetryTimeDuration = () => Session.set('retryTimeDuration', moment(Meteor.status().retryTime).diff());
 
@@ -46,3 +54,27 @@ remote = cmd => {
     console[(_.isArray(r) && r.length ? 'table' : 'log')](r);
   });
 };
+
+Template.reloadStatus.events({
+  'click .js-reload'() { Session.set('reload', true); return false; },
+});
+
+// block hot code push if in production
+if (lp.isProduction()) {
+  Reload._onMigrate(retry => {
+    Session.set('needReload', true);
+
+    if (Session.get('reload')) {
+      Session.set('needReload', false);
+      Session.set('reload', false);
+      return [true];
+    }
+
+    Tracker.autorun(() => {
+      if (Session.get('reload')) {
+        retry();
+      }
+    });
+    return [false];
+  });
+}

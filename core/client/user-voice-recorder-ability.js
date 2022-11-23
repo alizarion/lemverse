@@ -1,3 +1,6 @@
+import audioManager from './audio-manager';
+import networkManager from './network-manager';
+
 let mediaRecorder;
 let recordedChunks = [];
 const minChunkSize = 1000; // ~100ms
@@ -41,7 +44,7 @@ userVoiceRecorderAbility = {
     this.loading = false;
 
     mediaRecorder = new MediaRecorder(stream, {
-      mimeType: sounds.getSupportedType(),
+      mimeType: audioManager.getSupportedType(),
       audio: true,
       video: false,
     });
@@ -90,7 +93,7 @@ userVoiceRecorderAbility = {
     this.progress += delta / 1000;
     if (this.progress >= recordingMaxDuration) { this.stop(); return; }
 
-    const progress = 360 / recordingMaxDuration * this.progress;
+    const progress = (360 / recordingMaxDuration) * this.progress;
     const radialProgressBar = this.recordingIndicator.getAt(0);
     radialProgressBar.clear();
     radialProgressBar.fillStyle(0x0078e7);
@@ -121,8 +124,8 @@ userVoiceRecorderAbility = {
 
 const sendAudioChunksToTargets = (chunks, userIds) => {
   // Upload
-  const blob = sounds.generateBlob(chunks);
-  const file = new File([blob], `audio-record.${sounds.getExtension()}`, { type: blob.type });
+  const blob = audioManager.generateBlob(chunks);
+  const file = new File([blob], `audio-record.${audioManager.getExtension()}`, { type: blob.type });
   const uploadInstance = Files.insert({
     file,
     chunkSize: 'dynamic',
@@ -138,11 +141,11 @@ const sendAudioChunksToTargets = (chunks, userIds) => {
 
 sendAudioChunksToUsersInZone = async chunks => {
   const user = Meteor.user();
-  const usersInZone = zones.usersInZone(zones.currentZone(user));
+  const usersInZone = zoneManager.usersInZone(zoneManager.currentZone(user));
   const userInZoneIds = usersInZone.map(u => u._id);
 
   try {
-    await peer.sendData(userInZoneIds, { type: 'audio', emitter: user._id, data: chunks });
+    await networkManager.sendData(userInZoneIds, { type: 'audio', emitter: user._id, data: chunks });
     lp.notif.success(`📣 Everyone has heard your powerful voice`);
   } catch { lp.notif.warning('❌ No one is there to hear you'); }
 };
@@ -150,7 +153,7 @@ sendAudioChunksToUsersInZone = async chunks => {
 sendAudioChunksToNearUsers = chunks => {
   const { nearUsers } = userProximitySensor;
   const userIds = [...new Set(_.keys(nearUsers))].filter(target => target !== Meteor.userId());
-  if (!userIds.length) { lp.notif.error(`You need someone near you to whisper`); return undefined; }
+  if (!userIds.length) { lp.notif.warning(`You need someone near you to whisper`); return undefined; }
 
   lp.notif.success('✉️ Your voice message has been sent!');
   return sendAudioChunksToTargets(chunks, userIds);

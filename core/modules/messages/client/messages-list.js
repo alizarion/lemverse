@@ -1,39 +1,32 @@
-const getCurrentChannelName = () => {
-  const channel = Session.get('messagesChannel');
-  if (!channel) return '-';
+import { canSubscribeToNotifications, messageModerationAllowed } from '../misc';
+import { getCurrentChannelName, formatDate, formatText, show } from './helpers';
 
-  if (channel.includes('zon_')) return Zones.findOne(channel)?.name || 'Zone';
-  else if (channel.includes('qst_')) return '';
+function computeReactionToolboxPosition(element) {
+  const elemRect = element.getBoundingClientRect();
+  const parentRect = document.querySelector('.right-content').getBoundingClientRect();
 
-  const userIds = channel.split(';');
-  const users = Meteor.users.find({ _id: { $in: userIds } }).fetch();
-  const userNames = users.map(user => user.profile.name);
-
-  return userNames.join(' & ');
-};
+  return {
+    left: elemRect.left - parentRect.left + window.scrollX,
+    top: elemRect.top - parentRect.top + window.scrollY,
+  };
+}
 
 const sortedMessages = () => Messages.find({}, { sort: { createdAt: 1 } }).fetch();
 
 const scrollToBottom = () => {
-  const messagesElement = document.querySelector('.messages-list');
-  if (messagesElement) messagesElement.scrollTop = messagesElement.scrollHeight;
-};
-
-const formatText = text => {
-  let finalText = lp.purify(text);
-  finalText = formatURLs(finalText);
-  finalText = replaceTextVars(finalText);
-
-  return finalText.replace(/(?:\r\n|\r|\n)/g, '<br>');
+  Tracker.afterFlush(() => {
+    const messagesElement = document.querySelector('.messages-list');
+    if (messagesElement) messagesElement.scrollTop = messagesElement.scrollHeight;
+  });
 };
 
 Template.messagesListMessage.onCreated(function () {
-  this.moderationAllowed = messageModerationAllowed(Meteor.userId(), this.data.message);
+  this.moderationAllowed = messageModerationAllowed(Meteor.user(), this.data.message);
 });
 
 Template.messagesListMessage.helpers({
   user() { return Meteor.users.findOne(this.message.createdBy); },
-  userName() { return Meteor.users.findOne(this.message.createdBy)?.profile.name || '[removed]'; },
+  userName() { return Meteor.users.findOne(this.message.createdBy)?.profile.name || 'Guest'; },
   text() { return formatText(this.message.text); },
   file() {
     if (!this.message.fileId) return undefined;
@@ -42,28 +35,63 @@ Template.messagesListMessage.helpers({
   date() { return this.message.createdAt.toDateString(); },
   time() { return this.message.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); },
   showActions() { return Template.instance().moderationAllowed; },
+  isOwner() { return this.message.createdBy === Meteor.userId(); },
+  reactions() {
+    const userId = Meteor.userId();
+    return Object.entries(this.message.reactions || []).map(reaction => ({ reaction: reaction[0], amount: reaction[1].length, owner: reaction[1].indexOf(userId) > -1 }));
+  },
 });
 
 Template.messagesListMessage.events({
   'click .js-username'(event, templateInstance) {
     event.preventDefault();
     event.stopPropagation();
+
     const userId = templateInstance.data.message.createdBy;
-    if (userId) Session.set('modal', { template: 'profile', userId });
+    if (userId) Session.set('modal', { template: 'userProfile', userId });
   },
   'click .js-message-remove'(event, templateInstance) {
     const messageId = templateInstance.data.message._id;
     lp.notif.confirm('Delete message', `Do you really want to delete this message?`, () => Messages.remove(messageId));
   },
+  'click .js-message-report'(event, templateInstance) {
+    const messageId = templateInstance.data.message._id;
+    const userId = templateInstance.data.message.createdBy;
+    Session.set('modal', { template: 'report', userId, messageId });
+  },
+  'click .js-message-open-reactions-box'(event, templateInstance) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const messageId = templateInstance.data.message._id;
+    const position = computeReactionToolboxPosition(event.target);
+    Session.set('messageReaction', { messageId, x: position.left, y: position.top });
+  },
+  'click .js-message-reaction'(event, templateInstance) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const messageId = templateInstance.data.message._id;
+    Meteor.call('toggleMessageReaction', messageId, event.target.dataset.reaction);
+  },
   'load .files img'() { scrollToBottom(); },
 });
 
 Template.messagesList.onCreated(function () {
+  Session.set('messagesUI', false);
   this.userSubscribeHandler = undefined;
   this.fileSubscribeHandler = undefined;
 
   this.autorun(() => {
-    if (!Session.get('console')) {
+    if (Session.get('console')) return;
+
+    Tracker.nonreactive(() => {
+      Session.set('messagesUI', false);
+    });
+  });
+
+  this.autorun(() => {
+    if (!Session.get('messagesUI')) {
       this.fileSubscribeHandler?.stop();
       this.userSubscribeHandler?.stop();
       messagesModule.stopListeningMessagesChannel();
@@ -73,30 +101,32 @@ Template.messagesList.onCreated(function () {
     const messages = Messages.find({}, { fields: { createdBy: 1, fileId: 1 } }).fetch();
 
     const userIds = messages.map(message => message.createdBy).filter(Boolean);
-    this.userSubscribeHandler = this.subscribe('usernames', userIds, () => scrollToBottom());
+    this.userSubscribeHandler = this.subscribe('usernames', userIds, scrollToBottom);
 
     const filesIds = messages.map(message => message.fileId).filter(Boolean);
-    this.fileSubscribeHandler = this.subscribe('files', filesIds);
+    this.fileSubscribeHandler = this.subscribe('files', filesIds, scrollToBottom);
   });
 });
 
 Template.messagesList.helpers({
   channelName() { return getCurrentChannelName(); },
   messages() { return sortedMessages(); },
-  canSubscribe() { return Session.get('messagesChannel')?.includes('zon_'); },
+  canSubscribe() {
+    return canSubscribeToNotifications(Session.get('messagesChannel'));
+  },
   subscribed() {
-    const channel = Session.get('messagesChannel');
-    if (!channel?.includes('zon_')) return false;
+    const channelId = Session.get('messagesChannel');
+    if (!canSubscribeToNotifications(channelId)) return false;
 
-    const { zoneLastSeenDates } = Meteor.user();
-    return !zoneLastSeenDates || !zoneLastSeenDates[channel];
+    const { zoneLastSeenDates } = Meteor.user({ fields: { zoneLastSeenDates: 1 } });
+    return !zoneLastSeenDates || !zoneLastSeenDates[channelId];
   },
   muted() {
-    const channel = Session.get('messagesChannel');
-    if (!channel?.includes('zon_')) return false;
+    const channelId = Session.get('messagesChannel');
+    if (!canSubscribeToNotifications(channelId)) return false;
 
-    const { zoneMuted } = Meteor.user();
-    return !zoneMuted || !zoneMuted[channel];
+    const { zoneMuted } = Meteor.user({ fields: { zoneMuted: 1 } });
+    return !zoneMuted || !zoneMuted[channelId];
   },
   sameDay(index) {
     if (index === 0) return true;
@@ -107,13 +137,10 @@ Template.messagesList.helpers({
   },
   formattedSeparationDate(index) {
     const messages = sortedMessages();
-    const messageDate = new Date(messages[index].createdAt);
-
-    const date = new Date();
-    if (messageDate.getDate() === date.getDate()) return 'Today';
-    if (messageDate.getDate() === date.getDate() - 1) return 'Yesterday';
-
-    return messageDate.toDateString();
+    return formatDate(new Date(messages[index].createdAt));
+  },
+  show() {
+    return show();
   },
 });
 
@@ -123,10 +150,10 @@ Template.messagesList.events({
     event.stopPropagation();
 
     const channelId = Session.get('messagesChannel');
-    if (!channelId.includes('zon_')) return;
-    Meteor.call('updateZoneLastSeenDate', channelId, true, err => {
+    if (!channelId.includes('zon_') && !channelId.includes('lvl_')) return;
+    Meteor.call('messagesUpdateChannelLastSeenDate', channelId, true, err => {
       if (err) return;
-      lp.notif.success('🔔 You will be notified of news from this zone');
+      lp.notif.success('🔔 You will be notified of news from this channel');
     });
   },
   'click .js-channel-unsubscribe'(event) {
@@ -135,7 +162,7 @@ Template.messagesList.events({
 
     const channelId = Session.get('messagesChannel');
     if (!channelId.includes('zon_')) return;
-    Meteor.call('unsubscribeFromZone', channelId, err => {
+    Meteor.call('messagesUnsubscribeFromChannelNotifications', channelId, err => {
       if (err) return;
       lp.notif.success('🔔 You will no longer be notified');
     });

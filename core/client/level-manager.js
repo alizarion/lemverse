@@ -1,27 +1,11 @@
 import Phaser from 'phaser';
 
+import networkManager from './network-manager';
+
 const defaultMapConfig = { width: 100, height: 100, tileWidth: 48, tileHeight: 48 };
 const defaultLayerCount = 9;
 const defaultLayerDepth = { 6: 10000, 7: 10001, 8: 10002 };
 const defaultTileset = { layer: 2, firstgid: 0, tileProperties: {} };
-
-// Phaser has a culling bug, its camera.dirty flag is always false. For the moment this logic bypasses the problem, to remove later
-const layerCullingCache = {};
-function customCull(layer, camera, outputArray, renderOrder) {
-  if (!Session.get('editor') && layerCullingCache[layer.name]?.cached) return layerCullingCache[layer.name].tiles;
-
-  if (outputArray === undefined) outputArray = [];
-  if (renderOrder === undefined) renderOrder = 0;
-  outputArray.length = 0;
-
-  // eslint-disable-next-line new-cap
-  const bounds = Phaser.Tilemaps.Components.CullBounds(layer, camera);
-  // eslint-disable-next-line new-cap
-  Phaser.Tilemaps.Components.RunCull(layer, bounds, renderOrder, outputArray);
-  layerCullingCache[layer.name] = { cached: true, tiles: outputArray };
-
-  return outputArray;
-}
 
 levelManager = {
   layers: [],
@@ -34,7 +18,7 @@ levelManager = {
   },
 
   createMapFromLevel(level) {
-    this.map = this.scene.make.tilemap({ ...level, ...defaultMapConfig });
+    this.map = this.scene.make.tilemap({ ...defaultMapConfig, ...level });
     this.initMapLayers();
     this.addTilesetsToLayers(Tilesets.find().fetch());
 
@@ -67,12 +51,8 @@ levelManager = {
     const tileset = this.map.getTileset(newTile.tilesetId) || defaultTileset;
     const layer = this.tileLayer(tileset, newTile.index);
 
-    this.map.putTileAt(this.tileGlobalIndex(tileset, newTile.index), newTile.x, newTile.y, false, layer);
+    this.map.putTileAt(this.tileGlobalIndex(tileset, newTile.index), newTile.x, newTile.y, false, layer)?.setAlpha(1);
     window.dispatchEvent(new CustomEvent(eventTypes.onTileChanged, { detail: { tile: newTile, layer } }));
-  },
-
-  markCullingAsDirty() {
-    Object.keys(layerCullingCache).forEach(key => { layerCullingCache[key].cached = false; });
   },
 
   update() {},
@@ -106,24 +86,23 @@ levelManager = {
       const layer = this.map.createBlankLayer(`${i}`);
       layer.setName(`${i}`);
       layer.setCullPadding(4, 4);
-      if (lp.isLemverseBeta('custom-culling')) layer.cullCallback = customCull;
       if (defaultLayerDepth[i]) layer.setDepth(defaultLayerDepth[i]);
       this.layers.push(layer);
 
       return i;
     });
-
-    this.markCullingAsDirty();
   },
 
   destroyMapLayers() {
-    const { world } = this.scene.physics;
-    this.layers.forEach(layer => {
-      if (layer.playerCollider) world?.removeCollider(layer.playerCollider);
-      layer.destroy();
-    });
+    if (this.scene) {
+      const { world } = this.scene.physics;
+      this.layers.forEach(layer => {
+        if (layer.playerCollider) world?.removeCollider(layer.playerCollider);
+        layer.destroy();
+      });
+    }
 
-    this.map.removeAllLayers();
+    this.map?.removeAllLayers();
     this.layers = [];
   },
 
@@ -137,7 +116,7 @@ levelManager = {
     loadingScene.setText('');
     loadingScene.show(() => {
       // Phaser sends the sleep event on the next frame which causes the client to overwrite the spawn position set by the server
-      userManager.onSleep();
+      networkManager.onSleep();
 
       this.scene.scene.sleep();
       Meteor.call('teleportUserInLevel', levelId, (error, levelName) => {
@@ -153,7 +132,7 @@ levelManager = {
   },
 
   tileRefresh(x, y) {
-    this.layers.forEach((layer, i) => this.map.removeTileAt(x, y, false, false, i));
+    this.layers.forEach((_layer, i) => this.map.removeTileAt(x, y, false, false, i));
 
     Tiles.find({ x, y }).forEach(tile => {
       const tileset = this.map.getTileset(tile.tilesetId) || defaultTileset;
@@ -161,16 +140,39 @@ levelManager = {
     });
   },
 
+  getTilesRelativeToPosition(position, offset, layers = []) {
+    const tileX = this.map.worldToTileX(position.x + offset.x);
+    const tileY = this.map.worldToTileY(position.y + offset.y);
+
+    const tiles = [];
+    if (layers.length === 0) {
+      for (let l = this.map.layers.length; l >= 0; l--) {
+        const tile = this.map.getTileAt(tileX, tileY, false, l);
+        if (tile) tiles.push(tile);
+      }
+    } else {
+      layers.forEach(l => {
+        const tile = this.map.getTileAt(tileX, tileY, false, l);
+        if (tile) tiles.push(tile);
+      });
+    }
+
+    return tiles;
+  },
+
   tileGlobalIndex(mapTileset, tileIndex) { return (mapTileset.firstgid || 0) + tileIndex; },
 
   tileLayer(mapTileset, tileIndex) { return mapTileset.tileProperties[tileIndex]?.layer ?? defaultTileset.layer; },
 
-  onLevelLoaded() {
+  onLevelLoaded(levelDocument) {
     this.scene.scene.wake();
 
     // simulate a first frame update to avoid weirds visual effects with characters animation and direction
     this.scene.update(0, 0);
-    setTimeout(() => game.scene.keys.LoadingScene.hide(() => this.scene.enableKeyboard(true)), 0);
+    setTimeout(() => game.scene.keys.LoadingScene.hide(() => {
+      this.scene.enableKeyboard(true);
+      window.dispatchEvent(new CustomEvent(eventTypes.onLevelLoaded, { detail: { level: levelDocument } }));
+    }), 0);
 
     if (Meteor.settings.public.debug) {
       this.layers[0].renderDebug(this.scene.add.graphics(), {
@@ -181,6 +183,10 @@ levelManager = {
     }
 
     if (Tiles.find().count() === 0) this.drawTriggers(true);
+  },
+
+  onLevelUnloaded(levelDocument) {
+    window.dispatchEvent(new CustomEvent(eventTypes.onLevelUnloaded, { detail: { level: levelDocument } }));
   },
 
   onTilesetUpdated(newTileset, oldTileset) {

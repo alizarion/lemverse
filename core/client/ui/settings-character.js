@@ -1,15 +1,19 @@
+import { guestAllowed, permissionTypes } from '../../lib/misc';
+
 Template.settingsCharacter.onCreated(() => {
   if (!Session.get('settings-character-category')) Session.set('settings-character-category', 'body');
 });
 
 Template.settingsCharacter.helpers({
-  getAllImages() {
-    return Characters.find({ category: Session.get('settings-character-category'), $or: [{ hide: { $exists: false } }, { hide: false }] }).fetch();
+  getAllImages(category) {
+    if (category === undefined) category = Session.get('settings-character-category');
+    return Characters.find({ category: category, $or: [{ hide: { $exists: false } }, { hide: false }] }).fetch();
   },
   isBodyPart(id) {
     return Meteor.user().profile[Session.get('settings-character-category')] === id;
   },
   user() { return Meteor.user(); },
+  canEditSkin() { return !Meteor.user({ fields: { 'profile.guest': 1 } }).profile.guest || guestAllowed(permissionTypes.changeSkin); },
 });
 
 Template.settingsCharacter.events({

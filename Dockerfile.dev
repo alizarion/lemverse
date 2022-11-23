@@ -1,21 +1,22 @@
-FROM geoffreybooth/meteor-base:2.5
+FROM geoffreybooth/meteor-base:2.7.3
 # Disney Meteor base image
+RUN apt update && apt install -y \
+    bash \
+    ca-certificates \
+    graphicsmagick \
+    python3 \
+    make \
+    g++
 
 # Copy app package.json and package-lock.json into container
-COPY ./public/app/package*.json $APP_SOURCE_FOLDER/
+COPY ./app/package*.json $APP_SOURCE_FOLDER/
 
 RUN bash $SCRIPTS_FOLDER/build-app-npm-dependencies.sh
 
 # Copy app source into container
-COPY ./public/app $APP_SOURCE_FOLDER/
-RUN apt update && apt install -y \
-		bash \
-		ca-certificates \
-        imagemagick \
-        graphicsmagick \
-        python3 make g++
-
+COPY ./app $APP_SOURCE_FOLDER/
+COPY ./core $APP_SOURCE_FOLDER/core/
 
 WORKDIR $APP_SOURCE_FOLDER
 
-CMD ["meteor", "--unsafe-perm", "--settings", "settings-dev.json", "--port", "9000"]
+CMD ["meteor", "--unsafe-perm", "--settings", "settings-dev.json"]

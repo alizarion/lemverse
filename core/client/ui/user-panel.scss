@@ -1,21 +1,91 @@
 @import "../_variables";
 
-.user-panel {
+.js-openpanel {
   position: absolute;
-  z-index: 50;
+  z-index: 40;
   bottom: 10px;
   right: 10px;
-  opacity: 0;
-  transition: opacity 0.15s;
+  display: none;
 
-  &.visible {
-    opacity: 1;
+  @include media-max("phone-down") {
+    display: block;
+    &.displaynone {
+      display: none;
+    }
+    &.videoactive {
+      display: none !important;
+    }
   }
 
   .js-stream-me {
     position: relative;
-    width: 205px;
-    height: 46px;
+    width: 53px;
+    height: 53px;
+    background-color: rgba($main-color, 0.9);
+    border-radius: 15px;
+    z-index: 30;
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-position: 50% 50%;
+    transition: all 0.15s linear;
+    overflow: hidden;
+
+    .buttons {
+      position: absolute;
+      bottom: 8px;
+      left: 0;
+      right: 0;
+      display: flex;
+      gap: 7px;
+      justify-content: center;
+
+      .button {
+        position: relative;
+        background-color: lighten($main-color, 75%);
+        height: 36px;
+        width: 36px;
+        box-sizing: content-box;
+        padding: 0;
+        margin: 0;
+        border-radius: $radius;
+        color: $main-color;
+
+        svg {
+          fill: $main-color;
+          transform: translateY(2px) scale(0.95);
+        }
+      }
+    }
+  }
+}
+
+.user-panel {
+  position: fixed;
+  z-index: 50;
+  bottom: 10px;
+  right: 10px;
+
+  @include media-max("phone-down") {
+    transform: translate(300px);
+    transition: transform 0.5s;
+
+    &.visible {
+      transform: translate(0px);
+    }
+
+    &.videoActive {
+      transform: translate(240px);
+
+      &.visible {
+        transform: translate(0px);
+      }
+    }
+  }
+
+  .js-stream-me {
+    position: relative;
+    width: 280px;
+    height: 53px;
     background-color: rgba($main-color, 0.9);
     border-radius: 15px;
     z-index: 30;
@@ -26,7 +96,7 @@
     overflow: hidden;
 
     &.active {
-      width: 240px;
+      width: 280px;
       height: 180px;
       background-color: rgba($main-color, 1);
 
@@ -36,11 +106,11 @@
     }
 
     video {
-      width: 240px;
+      width: 100%;
       height: 180px;
       border-radius: 10px;
       display: none;
-      object-fit: scale-down;
+      object-fit: cover;
       transform: scale(-1, 1);
     }
 
@@ -57,6 +127,14 @@
       gap: 7px;
       justify-content: center;
 
+      @include media-max("phone-down") {
+        justify-content: space-evenly;
+        .button.screen,
+        .js-show-messaging-interface {
+          display: none;
+        }
+      }
+
       .separator {
         color: #d2d5e0;
         transform: translateY(5px);
@@ -64,9 +142,9 @@
 
       .button {
         position: relative;
-        background-color: lighten($main-color, 65%);
-        height: 30px;
-        width: 30px;
+        background-color: lighten($main-color, 75%);
+        height: 36px;
+        width: 36px;
         box-sizing: content-box;
         padding: 0;
         margin: 0;
@@ -75,25 +153,31 @@
 
         svg {
           fill: $main-color;
-          transform: translate(0, 2px) scale(0.85);
-        }
-
-        &:hover {
-          background-color: lighten($main-color, 70%);
+          transform: translateY(2px) scale(0.95);
         }
 
         &.active {
-          background-color: $light-green;
+          background-color: $new-green;
         }
 
-        &:not(.active):nth-child(-n+3)::before {
+        &:disabled {
+          background-color: hsl(0deg, 0%, 63%);
+        }
+
+        @media (hover: hover) {
+          &:hover {
+            background-color: lighten($new-green, 20%);
+          }
+        }
+
+        &:not(.active):nth-child(-n + 3)::before {
           content: "\\";
           position: absolute;
           color: $main-color;
           z-index: 1000;
           font-size: 1.8rem;
-          top: -2px;
-          left: 10px;
+          top: 1px;
+          left: 13px;
           transform: rotate(62deg);
           pointer-events: none;
           text-shadow: 0px 0px 3px #eff1f6;
@@ -133,4 +217,8 @@
       }
     }
   }
+}
+
+.displaynone {
+  display: none !important;
 }

@@ -1,5 +1,13 @@
 import hotkeys from 'hotkeys-js';
 import Phaser from 'phaser';
+import audioManager from './audio-manager';
+import meetingRoom from './meeting-room';
+import { setReaction } from './helpers';
+import URLOpener from './url-opener';
+import { guestAllowed, permissionTypes } from '../lib/misc';
+import initSentryClient from './sentry';
+
+initSentryClient();
 
 scopes = {
   player: 'player',
@@ -35,7 +43,6 @@ const config = {
   },
   render: {
     pixelArt: true, // disable anti-aliasing & enable round pixels
-    powerPreference: 'low-power',
   },
   scale: {
     mode: Phaser.Scale.RESIZE,
@@ -51,6 +58,17 @@ const extractLevelIdFromURL = () => {
   const levelId = FlowRouter.getParam('levelId');
   if (!levelId) return undefined;
   return `lvl_${levelId}`;
+};
+
+const updateWindowTitle = levelDocument => {
+  const titleParts = [Meteor.settings.public.lp.product];
+  if (levelDocument.name) {
+    titleParts.push(levelDocument.name);
+    game.scene.getScene('LoadingScene')?.setText(levelDocument.name);
+  }
+
+  const title = titleParts.reverse().join(' - ');
+  window.history.replaceState({}, title, Meteor.settings.public.lp.website);
 };
 
 Template.lemverse.onCreated(function () {
@@ -77,17 +95,14 @@ Template.lemverse.onCreated(function () {
   this.subscribe('notifications', () => {
     this.handleObserveNotifications = Notifications.find({ createdAt: { $gte: new Date() } }).observe({
       async added(notification) {
-        // remove new notification when the notification is about a new message:
-        // … and the interface showing textual messages is open
-        // … or the sender is talking to the user in vocal (a bubble should be visible on the screen)
-        if (notification.channelId === Session.get('messagesChannel') ||
-          (notification.channelId.includes(Meteor.userId()) && userProximitySensor.isUserNear({ _id: notification.createdBy }))) {
+        // remove notification when the user is already watching the channel targeted
+        if (notification.type !== 'vocal' && notification.channelId === Session.get('messagesChannel')) {
           Notifications.remove(notification._id);
           return;
         }
 
         if (!notification.type) {
-          sounds.play('text-sound.wav', 0.5);
+          audioManager.play('text-sound.wav', 0.5);
           notify(Meteor.users.findOne(notification.createdBy), `📢 You have received a new message`);
         }
 
@@ -111,15 +126,11 @@ Template.lemverse.onCreated(function () {
     game.scene.add('BootScene', BootScene, true);
 
     Tracker.nonreactive(() => {
-      if (!Meteor.user()?.profile.guest) peer.createMyPeer();
+      const user = Meteor.user();
+      if (!user) return;
+      if (user.profile.guest && !guestAllowed(permissionTypes.talkToUsers)) return;
 
-      // listen for click events on bubbles
-      document.querySelector('#game div:first-of-type').addEventListener('click', e => {
-        if (e.target.classList.contains('copy')) {
-          const content = e.target.textContent;
-          navigator.clipboard.writeText(content).then(() => lp.notif.success('Copied to clipboard! ✂️'));
-        }
-      });
+      peer.createMyPeer();
     });
   });
 
@@ -127,7 +138,8 @@ Template.lemverse.onCreated(function () {
     const { status } = Meteor.status();
     Tracker.nonreactive(() => {
       const user = Meteor.user();
-      if (!user || user.profile.guest) return;
+      if (!user) return;
+      if (user.profile.guest && !guestAllowed(permissionTypes.talkToUsers)) return;
 
       if (status === 'connected') peer.createMyPeer();
       else peer.peerInstance?.disconnect();
@@ -137,7 +149,7 @@ Template.lemverse.onCreated(function () {
   this.autorun(() => {
     if (!Meteor.userId()) {
       Session.set('sceneWorldReady', false);
-      userManager.unsetMainPlayer();
+      userManager.setAsControlled();
     }
   });
 
@@ -149,7 +161,6 @@ Template.lemverse.onCreated(function () {
     Tracker.nonreactive(() => {
       const interfaceOpen = menuOpen || modalOpen;
       const worldScene = game.scene.getScene('WorldScene');
-      userManager.pauseAnimation(undefined, modalOpen);
       worldScene.enableMouse(!interfaceOpen);
       worldScene.enableKeyboard(!modalOpen, !modalOpen);
     });
@@ -168,9 +179,10 @@ Template.lemverse.onCreated(function () {
         });
       }
 
-      if (meet.api) {
-        if (user.profile.shareAudio) meet.unmute();
-        else meet.mute();
+      if (meetingRoom.isOpen()) {
+        const meetingRoomService = meetingRoom.getMeetingRoomService();
+        if (user.profile.shareAudio) meetingRoomService.unmute();
+        else meetingRoomService.mute();
       }
     });
   });
@@ -189,9 +201,10 @@ Template.lemverse.onCreated(function () {
         });
       }
 
-      if (meet.api) {
-        if (user.profile.shareVideo) meet.unhide();
-        else meet.hide();
+      if (meetingRoom.isOpen()) {
+        const meetingRoomService = meetingRoom.getMeetingRoomService();
+        if (user.profile.shareVideo) meetingRoomService.unhide();
+        else meetingRoomService.hide();
       }
     });
   });
@@ -200,9 +213,10 @@ Template.lemverse.onCreated(function () {
     const user = Meteor.user({ fields: { 'profile.shareScreen': 1 } });
     if (!user) return;
     Tracker.nonreactive(() => {
-      if (meet.api) {
-        if (user.profile.shareScreen) meet.shareScreen();
-        else meet.unshareScreen();
+      if (meetingRoom.isOpen()) {
+        const meetingRoomService = meetingRoom.getMeetingRoomService();
+        if (user.profile.shareScreen) meetingRoomService.shareScreen();
+        else meetingRoomService.unshareScreen();
       } else if (user.profile.shareScreen) {
         userStreams.createScreenStream().then(() => userStreams.screen(true));
       } else {
@@ -213,12 +227,16 @@ Template.lemverse.onCreated(function () {
 
   this.autorun(() => {
     if (!Session.get('sceneWorldReady')) return;
-    game.scene.getScene('EditorScene')?.updateEditionMarker(Session.get('selectedTiles'));
+    const selectedMenu = Session.get('editorSelectedMenu');
+
+    Tracker.nonreactive(() => game.scene.getScene('EditorScene')?.updateEditionMarker(selectedMenu));
   });
 
   this.autorun(() => {
     if (!Session.get('sceneWorldReady')) return;
-    game.scene.getScene('EditorScene')?.onEditorModeChanged(Session.get('editorSelectedMenu'));
+    const selectedMenu = Session.get('editorSelectedMenu');
+
+    Tracker.nonreactive(() => game.scene.getScene('EditorScene')?.onEditorModeChanged(selectedMenu));
   });
 
   this.autorun(() => {
@@ -286,10 +304,7 @@ Template.lemverse.onCreated(function () {
       const worldScene = game.scene.getScene('WorldScene');
       const uiScene = game.scene.getScene('UIScene');
 
-      // ensures scene is fullscreen and without iframe loaded
-      zones.closeIframeElement();
-      updateViewport(worldScene, viewportModes.fullscreen);
-
+      URLOpener.close();
       loadingScene.show();
 
       if (this.currentLevelId) {
@@ -297,23 +312,21 @@ Template.lemverse.onCreated(function () {
         Session.set('editor', 0);
         worldScene.scene.restart();
         uiScene.onLevelUnloaded();
+        levelManager.onLevelUnloaded(Levels.findOne(this.currentLevelId));
+
         this.currentLevelId = undefined;
         this.levelSubscribeHandler?.stop();
+
         return;
       }
 
       // subscribe to the loaded level
       log(`loading level: ${levelId || 'unknown'}…`);
       this.levelSubscribeHandler = this.subscribe('currentLevel', () => {
-        // update title
         const level = Levels.findOne(levelId);
-        const titleParts = [Meteor.settings.public.lp.product];
-        if (level.name) {
-          titleParts.push(level.name);
-          loadingScene.setText(level.name);
-        }
-        document.title = titleParts.reverse().join(' - ');
+        window.dispatchEvent(new CustomEvent(eventTypes.onLevelLoading, { detail: { level } }));
 
+        updateWindowTitle(level);
         worldScene.initFromLevel(level);
 
         // Load tiles
@@ -327,7 +340,10 @@ Template.lemverse.onCreated(function () {
 
           log('loading level: all tiles loaded');
           uiScene.onLevelLoaded();
-          levelManager.onLevelLoaded();
+          levelManager.onLevelLoaded(level);
+
+          // force canvas focus on level loaded
+          document.activeElement.blur();
         });
       });
 
@@ -335,10 +351,10 @@ Template.lemverse.onCreated(function () {
       log(`loading level: loading users`);
       this.handleUsersSubscribe = this.subscribe('users', levelId, () => {
         this.handleObserveUsers = Meteor.users.find({ 'status.online': true, 'profile.levelId': levelId }).observe({
-          added(user) { userManager.createUser(user); },
-          changed(user, oldUser) { userManager.updateUser(user, oldUser); },
+          added(user) { userManager.onDocumentAdded(user); },
+          changed(user, oldUser) { userManager.onDocumentUpdated(user, oldUser); },
           removed(user) {
-            userManager.removeUser(user);
+            userManager.onDocumentRemoved(user);
             userProximitySensor.removeNearUser(user);
             lp.defer(() => peer.close(user._id, 0, 'user-disconnected'));
           },
@@ -346,41 +362,35 @@ Template.lemverse.onCreated(function () {
 
         log('loading level: all users loaded');
         peer.init();
-      });
 
-      // Load entities
-      log(`loading level: loading entities`);
-      this.handleEntitiesSubscribe = this.subscribe('entities', levelId, () => {
-        this.handleObserveEntities = Entities.find({ levelId, prefab: { $exists: false } }).observe({
-          added(entity) { entityManager.onDocumentAdded(entity); },
-          changed(newEntity, oldEntity) { entityManager.onDocumentUpdated(newEntity, oldEntity); },
-          removed(entity) { entityManager.onDocumentRemoved(entity); },
-        });
-        log('loading level: all entities loaded');
-
-        // Load zones (after entities because a zone can be linked to an entity and update his appearance)
-        log(`loading level: loading zones`);
-        this.handleZonesSubscribe = this.subscribe('zones', levelId, () => {
-          this.handleObserveZones = Zones.find().observe({
-            added(zone) { zones.onDocumentAdded(zone); },
-            changed(newZone, oldZone) { zones.onDocumentUpdated(newZone, oldZone); },
-            removed(zone) { zones.onDocumentRemoved(zone); },
+        // Load entities
+        log(`loading level: loading entities`);
+        this.handleEntitiesSubscribe = this.subscribe('entities', levelId, () => {
+          this.handleObserveEntities = Entities.find({ levelId, prefab: { $exists: false } }).observe({
+            added(entity) { entityManager.onDocumentAdded(entity); },
+            changed(newEntity, oldEntity) { entityManager.onDocumentUpdated(newEntity, oldEntity); },
+            removed(entity) { entityManager.onDocumentRemoved(entity); },
           });
+          log('loading level: all entities loaded');
 
-          log('loading level: all zones loaded');
-          zones.checkDistances(userManager.player);
+          // Load zones (after entities because a zone can be linked to an entity and update his appearance)
+          log(`loading level: loading zones`);
+          this.handleZonesSubscribe = this.subscribe('zones', levelId, () => {
+            this.handleObserveZones = Zones.find().observe({
+              added(zone) { zoneManager.onDocumentAdded(zone); },
+              changed(newZone, oldZone) { zoneManager.onDocumentUpdated(newZone, oldZone); },
+              removed(zone) { zoneManager.onDocumentRemoved(zone); },
+            });
+
+            log('loading level: all zones loaded');
+            zoneManager.checkDistances(userManager.getControlledCharacter());
+          });
         });
       });
 
       this.currentLevelId = levelId;
       Session.set('menu', undefined);
-      game.scene.getScene('EditorScene')?.init();
     });
-  });
-
-  hotkeys('e', { scope: 'all' }, event => {
-    if (event.repeat || !isEditionAllowed(Meteor.userId())) return;
-    Session.set('editor', !Session.get('editor'));
   });
 
   hotkeys('shift+r', { scope: 'all' }, event => {
@@ -394,7 +404,8 @@ Template.lemverse.onCreated(function () {
     const user = Meteor.user();
     if (!user) return;
 
-    Meteor.users.update(Meteor.userId(), { [event.type === 'keydown' ? '$set' : '$unset']: { 'profile.reaction': user.profile.defaultReaction || Meteor.settings.public.defaultReaction } });
+    const userReaction = user.profile.defaultReaction || Meteor.settings.public.defaultReaction;
+    setReaction(event.type === 'keydown' ? userReaction : undefined);
   });
 
   hotkeys('f', { scope: scopes.player }, event => {
@@ -409,11 +420,6 @@ Template.lemverse.onCreated(function () {
     userManager.interact();
   });
 
-  hotkeys('r', { keyup: true, scope: scopes.player }, event => {
-    if (event.repeat) return;
-    userVoiceRecorderAbility.recordVoice(event.type === 'keydown', sendAudioChunksToUsersInZone);
-  });
-
   hotkeys('p', { keyup: true, scope: scopes.player }, event => {
     if (event.repeat) return;
 
@@ -426,13 +432,6 @@ Template.lemverse.onCreated(function () {
     e.preventDefault();
     e.stopPropagation();
     toggleModal('userList');
-  });
-
-  hotkeys('x', { scope: scopes.player }, e => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.repeat) return;
-    userManager.punch(Object.values(userProximitySensor.nearUsers));
   });
 });
 
@@ -449,7 +448,6 @@ Template.lemverse.onDestroyed(function () {
   if (this.handleZonesSubscribe) this.handleZonesSubscribe.stop();
   if (this.resizeObserver) this.resizeObserver.disconnect();
 
-  hotkeys.unbind('e', scopes.player);
   hotkeys.unbind('f', scopes.player);
   hotkeys.unbind('j', scopes.player);
   hotkeys.unbind('l', scopes.player);
@@ -463,13 +461,16 @@ Template.lemverse.onDestroyed(function () {
 
 Template.lemverse.helpers({
   allRemoteStreamsByUsers: () => peer.remoteStreamsByUsers.get(),
-  guest: () => Meteor.user()?.profile.guest,
-  hasNotifications: () => Notifications.find().count(),
+  guest: () => Meteor.user({ fields: { 'profile.guest': 1 } })?.profile.guest,
+  onboarding: () => Meteor.settings.public.lp.enableOnboarding && Meteor.user({ fields: { 'profile.guest': 1 } })?.profile.guest && !Meteor.user({ fields: { username: 1 } })?.username,
   loading: () => Session.get('loading'),
-  pendingNotificationsCount: () => Notifications.find({ read: { $exists: false } }).count(),
   screenMode: () => Template.instance().screenMode.get(),
   settingsOpen: () => (!Session.get('modal') ? false : (Session.get('modal').template.indexOf('settings') !== -1)),
   modules: () => Session.get('modules'),
+  mainModules: () => Session.get('mainModules'),
+  gameModules: () => Session.get('gameModules'),
+  displayNotificationButton: () => (Meteor.settings.public.features?.notificationButton?.enabled !== false),
+  allowFormLogin: () => (Meteor.settings.public.permissions?.allowFormLogin !== false)
 });
 
 Template.lemverse.events({

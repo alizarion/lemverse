@@ -1,3 +1,5 @@
+import { guestAllowed, permissionTypes } from '../../lib/misc';
+
 const talking = () => !!peer.remoteStreamsByUsers.get().length;
 
 const onMediaStreamStateChanged = event => {
@@ -8,7 +10,7 @@ const onMediaStreamStateChanged = event => {
     if (!stream) destroyVideoSource(this.videoScreenShareElement);
     else this.videoScreenShareElement.srcObject = stream;
 
-    const user = Meteor.user();
+    const user = Meteor.user({ fields: { 'profile.shareScreen': 1 } });
     if (user) this.videoScreenShareElement.classList.toggle('active', user.profile.shareScreen);
   } else if (type === streamTypes.main) {
     if (!this.videoElement) this.videoElement = document.querySelector('.js-stream-me video');
@@ -18,6 +20,7 @@ const onMediaStreamStateChanged = event => {
 };
 
 Template.userPanel.onCreated(function () {
+  if (Meteor.settings.public.features?.userPanel?.enabled === false) return;
   this.avatarURL = new ReactiveVar();
   window.addEventListener(eventTypes.onMediaStreamStateChanged, onMediaStreamStateChanged);
 
@@ -47,32 +50,58 @@ Template.userPanel.helpers({
   avatarURL() { return talking() && Template.instance().avatarURL.get(); },
   screenSharing() { return Meteor.user({ fields: { 'profile.shareScreen': 1 } })?.profile.shareScreen; },
   videoActive() { return talking() && Meteor.user({ fields: { 'profile.shareVideo': 1 } })?.profile.shareVideo; },
+  displayUserPanel() { return Meteor.settings.public.features?.userPanel?.enabled !== false; },
+  canTalkToUser() { return Meteor.user({ fields: { 'profile.guest': 1 } })?.profile.guest && guestAllowed(permissionTypes.talkToUsers); },
+  canUseMessaging() { return Meteor.user({ fields: { 'profile.guest': 1 } })?.profile.guest && guestAllowed(permissionTypes.useMessaging); },
 });
 
 Template.userPanel.events({
-  'mouseup .button.audio'(event) {
+  'click .button.audio'(event) {
     event.preventDefault();
     event.stopPropagation();
     toggleUserProperty('shareAudio');
   },
-  'mouseup .button.video'(event) {
+  'click .button.video'(event) {
     event.preventDefault();
     event.stopPropagation();
     toggleUserProperty('shareVideo');
   },
-  'mouseup .button.screen'(event) {
+  'click .button.screen'(event) {
     event.preventDefault();
     event.stopPropagation();
     toggleUserProperty('shareScreen');
   },
-  'mouseup .button.settings'(event) {
+  'click .button.settings'(event) {
     event.preventDefault();
     event.stopPropagation();
     toggleModal('settingsMain');
   },
-  'mouseup .button.js-user-invitation'(event) {
+  'click .button.js-show-messaging-interface'(event) {
     event.preventDefault();
     event.stopPropagation();
-    toggleModal('userInvitation', 'height-auto');
+    openConsole(true);
+  },
+  'click .button.js-show-users'(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleModal('userList');
+  },
+  'click .js-openpanel'(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    document.querySelector('.user-panel').focus();
+  },
+  'click .js-stream-me'(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    document.querySelector('.user-panel').focus();
+  },
+  'focus .user-panel'(event) {
+    event.currentTarget.classList.toggle('visible', true);
+    document.querySelector('.js-openpanel').classList.toggle('displaynone', true);
+  },
+  'blur .user-panel'(event) {
+    event.currentTarget.classList.toggle('visible', false);
+    document.querySelector('.js-openpanel').classList.toggle('displaynone', false);
   },
 });

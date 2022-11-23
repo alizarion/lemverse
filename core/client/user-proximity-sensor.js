@@ -2,8 +2,6 @@ userProximitySensor = {
   nearUsers: {},
   nearDistance: Meteor.settings.public.character.sensorNearDistance,
   farDistance: Meteor.settings.public.character.sensorFarDistance,
-  onProximityStarted: undefined,
-  onProximityEnded: undefined,
 
   checkDistances(user, otherUsers) {
     otherUsers.forEach(otherUser => this.checkDistance(user, otherUser));
@@ -11,7 +9,6 @@ userProximitySensor = {
 
   checkDistance(user, otherUser) {
     if (user._id === otherUser._id) return;
-    if (otherUser.profile.guest) return;
 
     const distance = this.distance(user, otherUser);
     if (distance < this.nearDistance) this.addNearUser(otherUser);
@@ -29,10 +26,7 @@ userProximitySensor = {
     const userAlreadyNear = this.isUserNear(user);
     this.nearUsers[user._id] = user;
 
-    if (!userAlreadyNear) {
-      window.dispatchEvent(new CustomEvent(eventTypes.onUserNear, { detail: { user } }));
-      if (this.onProximityStarted) this.onProximityStarted(user);
-    }
+    if (!userAlreadyNear) window.dispatchEvent(new CustomEvent(eventTypes.onUsersComeCloser, { detail: { users: [user] } }));
   },
 
   removeNearUser(user) {
@@ -40,16 +34,21 @@ userProximitySensor = {
 
     delete this.nearUsers[user._id];
 
-    window.dispatchEvent(new CustomEvent(eventTypes.onUserMovedAway, { detail: { user } }));
-    if (this.onProximityEnded) this.onProximityEnded(user);
+    window.dispatchEvent(new CustomEvent(eventTypes.onUsersMovedAway, { detail: { users: [user] } }));
   },
 
   callProximityStartedForAllNearUsers() {
-    if (this.onProximityStarted) _.each(this.nearUsers, user => this.onProximityStarted(user));
+    const users = Object.values(this.nearUsers);
+    if (!users.length) return;
+
+    window.dispatchEvent(new CustomEvent(eventTypes.onUsersComeCloser, { detail: { users } }));
   },
 
   callProximityEndedForAllNearUsers() {
-    if (this.onProximityEnded) _.each(this.nearUsers, user => this.onProximityEnded(user));
+    const users = Object.values(this.nearUsers);
+    if (!users.length) return;
+
+    window.dispatchEvent(new CustomEvent(eventTypes.onUsersMovedAway, { detail: { users } }));
     this.nearUsers = {};
   },
 
@@ -59,6 +58,10 @@ userProximitySensor = {
 
   isNearSomeone() {
     return this.nearUsersCount() > 0;
+  },
+
+  nearNonGuestUsers() {
+    return Object.values(this.nearUsers).filter(user => !user.profile.guest);
   },
 
   filterNearUsers(userIds) {

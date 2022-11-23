@@ -12,16 +12,35 @@
             </a>
           </div>
         {{/if}}
+        <ul class="reactions">
+          {{#each reaction in reactions}}
+            {{#if reaction.amount}}
+              <li data-reaction="{{reaction.reaction}}" class="reaction {{#if reaction.owner}}owner{{/if}} js-message-reaction">{{reaction.reaction}} {{reaction.amount}}</li>
+            {{/if}}
+          {{/each}}
+        </ul>
       </div>
-      <div class="actions {{#if showActions}}show{{/if}}">
-        <button type="button" class="button js-message-remove" tabindex="-1">x</button> 
+      <div class="actions-container">
+        <div class="action show">
+          <button type="button" class="button js-message-open-reactions-box" tabindex="-1">👍</button> 
+        </div>
+        {{#if showActions}}
+        <div class="action show">
+          <button type="button" class="button js-message-remove" tabindex="-1">x</button> 
+        </div>
+        {{/if}}
+        {{#unless isOwner}}
+        <div class="action show">
+          <button type="button" class="button js-message-report" tabindex="-1">🚨</button>
+        </div>
+        {{/unless}}
       </div>
     {{/if}}
   </div>
 </template>
 
 <template name="messagesList">
-  <div class="messages-module">
+  <div class="messages-module {{#if show}}show{{/if}}">
     <h3 class="channel-name">{{channelName}}</h3>
     <button type="button" class="js-message-list-close" title="Close" tabindex="15">
       <span class="simple-modal-close__text">✖</span>
@@ -50,5 +69,6 @@
         {{> messagesListMessage message=message }}
       {{/each}}
     </div>
+    {{> messageReaction}}
   </div>
 </template>

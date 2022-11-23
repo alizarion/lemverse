@@ -1,11 +1,19 @@
 const maxAttempt = 10;
 const delayBetweenAttempt = 2000; // in ms
 
-const isRemoteUserSharingMedia = (user, type) => (type === streamTypes.screen ? user.shareScreen : user.shareAudio || user.shareVideo);
+const findRemoteUser = userId => Meteor.users.findOne(userId,
+  { fields: {
+    'profile.userMediaError': 1,
+    'profile.shareAudio': 1,
+    'profile.shareVideo': 1,
+  } });
 
 const removeAllFullScreenElement = ignoredElement => {
   document.querySelectorAll('.stream .fullscreen').forEach(stream => {
     if (stream.parentElement !== ignoredElement) stream.classList.remove('fullscreen');
+  });
+  document.querySelectorAll('.js-fullscreen-close').forEach(elem => {
+    elem.classList.remove('visible');
   });
 };
 
@@ -25,11 +33,6 @@ const checkMediaAvailable = (template, type) => {
   if (!remoteUserIsNear) {
     log(`Stop retry to get ${remoteUser.name}'s ${type}, ${remoteUser.name} is too far`);
     return;
-  }
-
-  const user = Meteor.users.findOne({ _id: remoteUser._id }).profile;
-  if (!isRemoteUserSharingMedia(user, type)) {
-    log(`Remote user has nothing to share`);
   }
 
   const source = type === streamTypes.screen ? remoteUser.screen?.srcObject : remoteUser.main?.srcObject;
@@ -75,15 +78,13 @@ Template.remoteStream.onDestroyed(() => {
 });
 
 Template.remoteStream.helpers({
-  mediaState() { return Meteor.users.findOne({ _id: this.remoteUser._id })?.profile; },
+  mediaState() { return findRemoteUser(this.remoteUser._id)?.profile; },
   hasMainStream() { return this.remoteUser.main?.srcObject; },
   hasScreenStream() { return this.remoteUser.screen?.srcObject; },
   state() {
-    const user = Meteor.users.findOne({ _id: this.remoteUser._id });
+    const user = findRemoteUser(this.remoteUser._id);
     if (!user) return 'user-error';
-
-    const { profile } = user;
-    if (profile.userMediaError) return 'media-error';
+    if (user.profile.userMediaError) return 'media-error';
 
     return this.remoteUser.waitingCallAnswer ? 'calling' : 'connected';
   },
@@ -98,6 +99,8 @@ Template.remoteStream.events({
     const { target } = event;
     removeAllFullScreenElement(target);
     target.classList.toggle('fullscreen');
+    const closeBtn = target.parentElement.querySelector('.js-fullscreen-close')
+    closeBtn?.classList.toggle('visible', target.classList.contains('fullscreen'));
 
     updatePhaserMouseInputState();
   },
@@ -109,6 +112,8 @@ Template.remoteStream.events({
 
     const child = target.querySelector('video, img');
     child?.classList.toggle('fullscreen');
+    const closeBtn = target.querySelector('.js-fullscreen-close');
+    closeBtn?.classList.toggle('visible', child?.classList.contains('fullscreen'));
 
     updatePhaserMouseInputState();
   },

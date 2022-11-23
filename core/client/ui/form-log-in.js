@@ -1,17 +1,50 @@
+import { toggleUIInputs } from '../helpers';
+
+const RETRY_DELAY = 10; // seconds
+
 const onPasswordRecoverSubmit = template => {
   const { email } = template;
   if (!email) { lp.notif.error('Who are you mister anonymous? 🤔'); return; }
 
   Accounts.forgotPassword({ email }, err => {
-    if (err) {
-      if (err.message === 'User not found [403]') lp.notif.error('Who are you mister anonymous? 🤔');
-      else lp.notif.error(err.message);
-
+    if (err && err.message !== 'User not found [403]') {
+      lp.notif.error(err.message);
       return;
     }
 
-    lp.notif.success('An email has just been sent to you!');
+    lp.notif.success('You should receive an email shortly if the address belongs to an existing account 🙂');
     template.loginMode.set(true);
+  });
+};
+
+const startRetryCountdown = template => {
+  if (template.countdown) {
+    clearInterval(template.countdown);
+  }
+  template.counter.set(RETRY_DELAY);
+  template.countdown = setInterval(() => {
+    template.counter.set(template.counter.get() - 1);
+    if (template.counter.get() === 0) {
+      clearInterval(template.countdown);
+    }
+  }, 1000);
+};
+
+const passwordlessLogin = template => {
+  const options = {
+    selector: template.email,
+    options: { userCreationDisabled: true },
+  };
+  Accounts.requestLoginTokenForUser(options, err => {
+    if (err && err.message !== 'User not found [403]') {
+      lp.notif.error(err.message);
+      return;
+    } else if (err && err.message === 'User not found [403]') {
+      lp.notif.error('Account not found 😟');
+      return;
+    }
+    template.emailSent.set(true);
+    startRetryCountdown(template);
   });
 };
 
@@ -19,6 +52,7 @@ const onSubmit = template => {
   const { email, password } = template;
   if (!email) { lp.notif.error('Who are you mister anonymous? 🤔'); return; }
   if (!template.loginMode.get()) { onPasswordRecoverSubmit(template); return; }
+  if (Meteor.settings.public.passwordless) { passwordlessLogin(template); return; }
   if (!password) { lp.notif.error(`Hey! I need your password... Promise, I won't share it with anyone 🤐`); return; }
 
   const {
@@ -31,15 +65,18 @@ const onSubmit = template => {
   Meteor.loginWithPassword(email, password, err => {
     if (err) { lp.notif.error('Incorrect login or password'); return; }
 
-    if (Meteor.user().profile.levelId === ghostLevelId) {
-      savePlayer({
-        x: ghostX,
-        y: ghostY,
-        direction: ghostDirection,
+    const user = Meteor.user();
+    if (user.profile.levelId === ghostLevelId) {
+      Meteor.users.update(user._id, {
+        $set: {
+          'profile.x': ghostX,
+          'profile.y': ghostY,
+          'profile.direction': ghostDirection,
+        },
       });
     }
 
-    hotkeys.setScope(scopes.player);
+    toggleUIInputs(false);
   });
 };
 
@@ -47,12 +84,13 @@ Template.formLogIn.onCreated(function () {
   this.email = undefined;
   this.password = undefined;
   this.loginMode = new ReactiveVar(true);
+  this.emailSent = new ReactiveVar(false);
+  this.counter = new ReactiveVar(RETRY_DELAY);
+  this.countdown = undefined;
 });
 
 Template.formLogIn.events({
   'click .js-next-step'() { onSubmit(Template.instance()); },
-  'focus input'() { hotkeys.setScope('form'); game?.scene?.keys?.WorldScene?.enableKeyboard(false, false); },
-  'blur input'() { hotkeys.setScope(scopes.player); game?.scene?.keys?.WorldScene?.enableKeyboard(true, false); },
   'keyup .js-email'(event, templateInstance) { templateInstance.email = event.target.value; },
   'keyup .js-password'(event, templateInstance) { templateInstance.password = event.target.value; },
   'click .js-cancel-login-mode'() { Template.instance().loginMode.set(true); },
@@ -71,4 +109,8 @@ Template.formLogIn.helpers({
   email() { return Template.instance().email; },
   password() { return Template.instance().password; },
   loginMode() { return Template.instance().loginMode.get(); },
+  contactURL() { return Meteor.settings.public.permissions?.contactURL; },
+  emailSent() { return Template.instance().emailSent.get(); },
+  counter() { return Template.instance().counter.get(); },
+  canRetry() { return !!Template.instance().counter.get(); },
 });

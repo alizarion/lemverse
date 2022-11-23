@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import RexPinchPlugin from '../plugins/rexpinchplugin.min';
 
 const assetsRoute = 'assets/images';
 const filesRoute = Meteor.settings.public.files.route;
@@ -12,13 +13,18 @@ BootScene = new Phaser.Class({
 
   preload() {
     this.load.image('circle', `${assetsRoute}/circle_white.png`);
-    this.load.image('pixel', `${assetsRoute}/pixel.png`);
+    this.load.plugin('rexpinchplugin', RexPinchPlugin, true);
+
+    // load pixel as base64 to avoid potential loading issue
+    const pixelImage = 'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs=';
+    this.textures.once(Phaser.Loader.Events.ADD, () => this.add.image(1, 1, 'pixel'), this);
+    this.textures.addBase64('pixel', pixelImage);
 
     Tilesets.find().forEach(tileset => this.load.image(tileset.fileId, `${filesRoute}/${tileset.fileId}`));
 
     const { frameHeight, frameWidth } = Meteor.settings.public.assets.character;
     Characters.find().forEach(character => {
-      this.load.spritesheet(character.fileId, `${filesRoute}/${character.fileId}`, {
+      this.load.spritesheet(character._id, `${filesRoute}/${character.fileId}`, {
         frameWidth: frameWidth || 16,
         frameHeight: frameHeight || 32,
       });
@@ -48,7 +54,7 @@ BootScene = new Phaser.Class({
         Object.entries(animation).forEach(([key, direction]) => {
           this.anims.create({
             key: `${animationName}-${key}-${character._id}`,
-            frames: this.anims.generateFrameNumbers(character.fileId, { frames: direction.frames }),
+            frames: this.anims.generateFrameNumbers(character._id, { frames: direction.frames }),
             frameRate: direction.frameRate,
             repeat: direction.repeat,
           });

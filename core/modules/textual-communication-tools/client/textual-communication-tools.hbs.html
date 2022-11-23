@@ -1,8 +1,10 @@
 <template name="textualCommunicationTools">
-  {{#unless guest}}
+  {{#if canUseModule}}
     <div class="two-cols-modules {{#if show}}show{{/if}}">
       <div class="left-content">
-        {{> messagesChannelSelector}}
+        {{#if useGenericChat}}
+          {{> messagesChannelSelector}}
+        {{/if}}
         {{> questsList}}
       </div>
       <div class="right-content">
@@ -11,5 +13,5 @@
         {{> console}}
       </div>
     </div>
-  {{/unless}}
+  {{/if}}
 </template>

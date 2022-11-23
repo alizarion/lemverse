@@ -1,5 +1,12 @@
 zoom = 1.5;
-selectedTileset = () => Tilesets.findOne(Session.get('selectedTilesetId')) || {};
+const _selectedTileset = new ReactiveVar();
+selectedTileset = () => _selectedTileset.get();
+
+Tracker.autorun(() => {
+  const tilesetId = Session.get('selectedTilesetId');
+  if (!tilesetId) return;
+  _selectedTileset.set(Tilesets.findOne(tilesetId) || {});
+});
 
 Tracker.autorun(() => {
   const creating = Session.get('selectedEditTilesetId');
@@ -15,6 +22,7 @@ Template.registerHelper('tile2domX', index => {
   const tileX = index % (selectedTileset().width / 16);
   return zoom * tileX * 16;
 });
+
 Template.registerHelper('tile2domY', index => {
   if (!index) return 0;
   const tileY = (index / (selectedTileset().width / 16) | 0);
@@ -22,7 +30,7 @@ Template.registerHelper('tile2domY', index => {
 });
 
 Template.registerHelper('tilesets', () => {
-  const filters = { hidden: { $exists: false } };
+  const filters = { hidden: { $ne: true } };
   if (Meteor.user()?.roles?.admin) delete filters.hidden;
 
   return Tilesets.find(filters, { sort: { name: 1 } });
@@ -34,10 +42,6 @@ Template.registerHelper('zoom', (v, w) => zoom * v * w);
 
 Template.editorTilesets.onCreated(function () {
   this.subscribe('tilesets');
-
-  this.autorun(() => {
-    selectedTileset();
-  });
 
   hotkeys('p', event => {
     event.preventDefault();
@@ -100,9 +104,6 @@ Template.editorTilesets.onCreated(function () {
   });
 });
 
-Template.editorTilesets.onRendered(() => {
-});
-
 Template.editorTilesets.onDestroyed(() => {
   hotkeys.unbind('c');
   hotkeys.unbind('0');
@@ -140,6 +141,11 @@ Template.editorTilesets.events({
   },
   'drop .js-drop-tileset'({ originalEvent }) {
     const uploadedFiles = originalEvent.dataTransfer.files;
+
+    const maxTileset = Tilesets.findOne({}, { sort: { gid: -1 }, limit: 1 });
+    let maxTilesetGid = 0;
+    if (maxTileset) maxTilesetGid = maxTileset.gid + 10000;
+
     Array.from(uploadedFiles).forEach(file => {
       if (!file) return;
 
@@ -148,6 +154,7 @@ Template.editorTilesets.events({
         chunkSize: 'dynamic',
         meta: {
           source: 'editor-tilesets',
+          gid: maxTilesetGid,
         },
       }, false);
 
@@ -156,18 +163,19 @@ Template.editorTilesets.events({
       });
 
       uploadInstance.start();
+      maxTilesetGid += 10000;
     });
   },
   'mousemove img'(event) {
     const x = (event.offsetX / (16 * zoom)) | 0;
     const y = (event.offsetY / (16 * zoom)) | 0;
-    const index = y * selectedTileset().width / 16 + x;
+    const index = (y * selectedTileset().width) / 16 + x;
     Session.set('pointerTileIndex', index);
   },
   'click img'(event) {
     const x = (event.offsetX / (16 * zoom)) | 0;
     const y = (event.offsetY / (16 * zoom)) | 0;
-    const index = y * selectedTileset().width / 16 + x;
+    const index = (y * selectedTileset().width) / 16 + x;
     Session.set('selectedTiles', { tilesetId: selectedTileset()._id, index });
   },
   'click .js-tilesets-select'() {
