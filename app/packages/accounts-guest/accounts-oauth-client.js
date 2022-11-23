@@ -71,7 +71,7 @@ const initOAuthService = (name, config) => {
 
 Meteor.startup(() => {
     Deps.autorun(() => {
-       const idpHint =  FlowRouter.current().queryParams.idpHint
+        const idpHint = FlowRouter.current().queryParams.idpHint;
         ServiceConfiguration.configurations
             .find()
             .observe({

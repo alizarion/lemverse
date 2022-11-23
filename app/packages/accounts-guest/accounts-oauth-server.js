@@ -103,26 +103,14 @@ const initOAuthService = (name, config) => {
   });
 };
 
-const { updateOrCreateUserFromExternalService } = Accounts;
-
-Accounts.updateOrCreateUserFromExternalService = function (serviceName, serviceData, options) {
-  const result = updateOrCreateUserFromExternalService.apply(this, [serviceName, serviceData, options]);
-  const user = Meteor.users.findOne(result.userId);
-  if (!user.emails) {
-    // first login through the sso provider, we proceed to the initialization of the profile
-    completeUserProfile(user, serviceData.email, options.profile.name);
-  }
-  return result;
-};
-
 Meteor.startup(() => {
   ServiceConfiguration.configurations
-    .find()
-    .observe({
-      added(record) {
-        if (record.type === 'oauth' && record.custom) {
-          initOAuthService(record.service, record);
-        }
-      },
-    });
+      .find()
+      .observe({
+        added(record) {
+          if (record.type === 'oauth' && record.custom) {
+            initOAuthService(record.service, record);
+          }
+        },
+      });
 });
