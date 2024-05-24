@@ -66,7 +66,56 @@ userManager = {
     this.players = {};
     this.scene = scene;
     this.userMediaStates = undefined;
+    // Gestion AFK
+    this.inactivityTime = 0;
+    this.afkThreshold = Meteor.settings.public.afkThreshold;
+    // .this.afkThreshold = 120000;
+    this.isAFK = false;
+
+    // Appeler checkAFKStatus périodiquement
+    this.scene.time.addEvent({
+      delay: Meteor.settings.public.delay,
+      loop: true,
+      callback: this.checkAFKStatus,
+      callbackScope: this,
+    });
   },
+
+  // Vérifier si le joueur est AFK
+  checkAFKStatus() {
+    const user = Meteor.users.findOne(Meteor.userId());
+
+    const isUserInZoneUnHide = user => {
+      if (zones.currentZone(user) !== undefined) return zones.currentZone(user).unhide;
+      else return false;
+    };
+
+    const isNearUser = Object.keys(userProximitySensor.nearUsers).length !== 0;
+    // console.log('isUserInZoneUnHide()', isUserInZoneUnHide(user));
+    // console.log('this.inactivityTime', this.inactivityTime);
+    // console.log('this.playerWasMoving', this.playerWasMoving);
+    // console.log('this.afk', this.isAFK);
+    // console.log('userProximitySensor', Object.keys(userProximitySensor.nearUsers).length === 0 ? 'vide' : 'non vide');
+    // console.log('userStreams', userStreams.audio(true) ? 'true' : false);
+
+    if (this.playerWasMoving || isUserInZoneUnHide(user) || isNearUser) {
+      this.inactivityTime = 0;
+      if (this.isAFK) {
+        this.isAFK = false;
+        this.setUserInDoNotDisturbMode(false);
+        console.log('n\'est plus en mode afk');
+      }
+    } else {
+      this.inactivityTime += 60000;
+      if (this.inactivityTime >= this.afkThreshold && !this.isAFK) {
+        this.isAFK = true;
+        this.setUserInDoNotDisturbMode(true);
+        console.log('mode afk');
+      }
+    }
+  },
+
+  // end of AFK management
 
   destroy() {
     this.onSleep();

@@ -16,6 +16,12 @@
 
     "zoom": 1,
 
+
+    "AFKStatus": {
+    "delay": 180000,
+    "afkThreshold": 1200000
+    },
+
     "peer": {
       "answerMaxAttempt": 5,
       "answerDelayBetweenAttempt": 750,
@@ -154,8 +160,8 @@
       "port": 443,
       "credentialDuration": 86400,
       "secret": "",
-      "config": { 
-        "iceServers": [{ 
+      "config": {
+        "iceServers": [{
           "urls": "stun:stun.l.google.com:19302"
         }],
         "iceTransportPolicy" : "all",
