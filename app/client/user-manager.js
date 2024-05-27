@@ -82,19 +82,14 @@ userManager = {
 
   checkAFKStatus() {
     const user = Meteor.users.findOne(Meteor.userId());
-    const isUserInZoneUnHide = user => {
-      if (zones.currentZone(user) !== undefined) return zones.currentZone(user).unhide;
-      else return false;
-    };
 
     const isNearUser = Object.keys(userProximitySensor.nearUsers).length !== 0;
 
-    if (this.playerWasMoving || isUserInZoneUnHide(user)) {
+    if (this.playerWasMoving || !!zones.currentZone(user)?.unhide) {
       this.inactivityTime = 0;
       if (this.isAFK) {
         this.isAFK = false;
         this.setUserInDoNotDisturbMode(false);
-        console.log('n\'est plus en mode afk');
         this.rename(`${this.player.name}`, 'white');
       }
       if (!this.isAFK && isNearUser) {
@@ -106,7 +101,6 @@ userManager = {
         this.rename(`${user.profile.name} 💤`, 'white');
         this.isAFK = true;
         this.setUserInDoNotDisturbMode(true);
-        console.log('mode afk');
       }
     }
   },
