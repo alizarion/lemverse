@@ -66,7 +66,46 @@ userManager = {
     this.players = {};
     this.scene = scene;
     this.userMediaStates = undefined;
+
+    // Gestion AFK
+
+    this.inactivityTime = 0;
+    this.afkThreshold = Meteor.settings.public.AFKStatusMinutes.afkThreshold * 60000;
+    this.isAFK = false;
+    this.scene.time.addEvent({
+      delay: 60000,
+      loop: true,
+      callback: this.checkAFKStatus,
+      callbackScope: this,
+    });
   },
+
+  checkAFKStatus() {
+    const user = Meteor.users.findOne(Meteor.userId());
+
+    const isNearUser = Object.keys(userProximitySensor.nearUsers).length !== 0;
+
+    if (this.playerWasMoving || !!zones.currentZone(user)?.unhide) {
+      this.inactivityTime = 0;
+      if (this.isAFK) {
+        this.isAFK = false;
+        this.setUserInDoNotDisturbMode(false);
+        this.rename(`${this.player.name}`, 'white');
+      }
+      if (!this.isAFK && isNearUser) {
+        this.isAFK = false;
+      }
+    } else {
+      this.inactivityTime += 60000;
+      if (this.inactivityTime >= this.afkThreshold && !isNearUser) {
+        this.rename(`${user.profile.name} 💤`, 'white');
+        this.isAFK = true;
+        this.setUserInDoNotDisturbMode(true);
+      }
+    }
+  },
+
+  // end of AFK management
 
   destroy() {
     this.onSleep();
