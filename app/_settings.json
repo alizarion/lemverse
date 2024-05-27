@@ -16,12 +16,6 @@
 
     "zoom": 1,
 
-
-    "AFKStatus": {
-    "delay": 180000,
-    "afkThreshold": 1200000
-    },
-
     "peer": {
       "answerMaxAttempt": 5,
       "answerDelayBetweenAttempt": 750,
