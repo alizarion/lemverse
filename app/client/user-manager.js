@@ -82,25 +82,33 @@ userManager = {
 
   checkAFKStatus() {
     const user = Meteor.users.findOne(Meteor.userId());
-
     const isNearUser = Object.keys(userProximitySensor.nearUsers).length !== 0;
+    const characterBodyContainer = this.player.getByName('body');
+
+    console.log('this.isAFK', this.isAFK);
 
     if (this.playerWasMoving || !!zones.currentZone(user)?.unhide) {
       this.inactivityTime = 0;
       if (this.isAFK) {
         this.isAFK = false;
-        this.setUserInDoNotDisturbMode(false);
-        this.rename(`${this.player.name}`, 'white');
+        toggleUserProperty('shareVideo', true);
+        toggleUserProperty('shareAudio', true);
+        characterBodyContainer.alpha = 1;
+        console.log('sortie du mode afk');
       }
       if (!this.isAFK && isNearUser) {
         this.isAFK = false;
       }
     } else {
       this.inactivityTime += 60000;
-      if (this.inactivityTime >= this.afkThreshold && !isNearUser) {
-        this.rename(`${user.profile.name} 💤`, 'white');
+      console.log('+1000');
+      if (this.inactivityTime >= this.afkThreshold && !isNearUser && !this.isAFK) {
         this.isAFK = true;
-        this.setUserInDoNotDisturbMode(true);
+        toggleUserProperty('shareVideo', false);
+        toggleUserProperty('shareAudio', false);
+        toggleUserProperty('shareScreen', false);
+        characterBodyContainer.alpha = 0.5;
+        console.log('mode afk');
       }
     }
   },
