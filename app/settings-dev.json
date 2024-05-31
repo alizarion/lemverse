@@ -17,7 +17,7 @@
     "zoom": 1,
 
     "AFKStatusMinutes": {
-      "afkThreshold": 0.1
+      "afkThreshold": 1
     },
 
     "peer": {
