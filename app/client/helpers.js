@@ -21,6 +21,8 @@ eventTypes = Object.freeze({
 toggleUserProperty = (propertyName, value) => {
   // the user must not be able to deactivate his microphone in the unmute zones
   if (propertyName === 'shareAudio' && (value || (value === undefined && !Meteor.user().profile.shareAudio))) {
+    userManager.isAFK = false;
+    userManager.inactivityTime = 0;
     if (meet.api && !zones.currentZone()?.unmute) {
       lp.notif.warning(`Your microphone is only accessible on stage`);
       return;
