@@ -68,7 +68,6 @@ userManager = {
     this.userMediaStates = undefined;
 
     // Gestion AFK
-
     this.inactivityTime = 0;
     this.afkThreshold = Meteor.settings.public.AFKStatusMinutes.afkThreshold * 60000;
     this.isAFK = false;
@@ -86,33 +85,46 @@ userManager = {
     const characterBodyContainer = this.player.getByName('body');
 
     console.log('this.isAFK', this.isAFK);
+    console.log('this.inactivityTime', this.inactivityTime);
+    // console.log('zones.currentZone(user)?.unhide', zones.currentZone(user)?.unhide);
+    console.log('meet.api', meet.api);
+    console.log('peer.peerInstance', peer.peerInstance);
 
-    if (this.playerWasMoving || !!zones.currentZone(user)?.unhide) {
-      this.inactivityTime = 0;
-      if (this.isAFK) {
-        this.isAFK = false;
-        toggleUserProperty('shareVideo', true);
-        toggleUserProperty('shareAudio', true);
-        characterBodyContainer.alpha = 1;
-        console.log('sortie du mode afk');
-      }
+    if (meet.api) {
+      this.switchAFKBack(characterBodyContainer);
       if (!this.isAFK && isNearUser) {
         this.isAFK = false;
       }
     } else {
-      this.inactivityTime += 60000;
-      console.log('+1000');
+      if (this.inactivityTime <= this.afkThreshold + 1000) {
+        this.inactivityTime += 60000;
+        console.log('+1000');
+      }
       if (this.inactivityTime >= this.afkThreshold && !isNearUser && !this.isAFK) {
         this.isAFK = true;
-        toggleUserProperty('shareVideo', false);
-        toggleUserProperty('shareAudio', false);
-        toggleUserProperty('shareScreen', false);
-        characterBodyContainer.alpha = 0.5;
-        console.log('mode afk');
+        this.switchAFK(characterBodyContainer);
       }
     }
   },
 
+  switchAFK(body) {
+    toggleUserProperty('shareVideo', false);
+    toggleUserProperty('shareAudio', false);
+    toggleUserProperty('shareScreen', false);
+    body.alpha = 0.5;
+    console.log('mode afk');
+  },
+
+  switchAFKBack(body) {
+    this.inactivityTime = 0;
+    if (this.isAFK) {
+      this.isAFK = false;
+    }
+    toggleUserProperty('shareVideo', true);
+    toggleUserProperty('shareAudio', true);
+    body.alpha = 1;
+    console.log('sortie du mode afk');
+  },
   // end of AFK management
 
   destroy() {

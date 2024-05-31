@@ -1,6 +1,5 @@
 import hotkeys from 'hotkeys-js';
 import Phaser from 'phaser';
-import { checkAFKStatus } from './user-manager'; // Importer la fonction checkAFKStatus
 
 scopes = {
   player: 'player',
@@ -98,23 +97,24 @@ Template.lemverse.onCreated(function () {
   if (extractedLevelId) Meteor.call('teleportUserInLevel', extractedLevelId);
 
   // START Subscription for AFK checking
-  const debounceDelay = 500;
-  let afkStatusTimeout;
-  this.autorun(() => {
-    const user = Meteor.user();
-    if (user) {
-      const { shareVideo, shareAudio, shareScreen } = user.profile;
-
-      if (shareVideo !== undefined || shareAudio !== undefined || shareScreen !== undefined) {
-        clearTimeout(afkStatusTimeout);
-        afkStatusTimeout = setTimeout(() => {
-          userManager.isAFK = false;
-          userManager.inactivityTime = 0;
-          console.log('toogle donc sortie du mode afk');
-        }, debounceDelay);
-      }
-    }
-  });
+  // const debounceDelay = 500;
+  // let afkStatusTimeout;
+  // this.autorun(() => {
+  //   console.log('autorun');
+  //   const user = Meteor.user();
+  //   if (user) {
+  //     const { shareVideo, shareAudio, shareScreen } = user.profile;
+  //
+  //     if (shareVideo !== undefined || shareAudio !== undefined || shareScreen !== undefined) {
+  //       clearTimeout(afkStatusTimeout);
+  //       afkStatusTimeout = setTimeout(() => {
+  //         userManager.isAFK = false;
+  //         userManager.inactivityTime = 0;
+  //         console.log('toogle donc sortie du mode afk');
+  //       }, debounceDelay);
+  //     }
+  //   }
+  // });
   // END Subscription for AFK checking
 
   this.currentLevelId = undefined;
