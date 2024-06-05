@@ -72,7 +72,7 @@ userManager = {
     this.afkThreshold = Meteor.settings.public.AFKStatusMinutes.afkThreshold * 60000;
     this.isAFK = false;
     this.scene.time.addEvent({
-      delay: 60000,
+      delay: 30000,
       loop: true,
       callback: this.checkAFKStatus,
       callbackScope: this,
@@ -80,50 +80,37 @@ userManager = {
   },
 
   checkAFKStatus() {
-    const user = Meteor.users.findOne(Meteor.userId());
     const isNearUser = Object.keys(userProximitySensor.nearUsers).length !== 0;
-    const characterBodyContainer = this.player.getByName('body');
-
-    console.log('this.isAFK', this.isAFK);
-    console.log('this.inactivityTime', this.inactivityTime);
-    // console.log('zones.currentZone(user)?.unhide', zones.currentZone(user)?.unhide);
-    console.log('meet.api', meet.api);
-    console.log('peer.peerInstance', peer.peerInstance);
-
-    if (meet.api) {
-      this.switchAFKBack(characterBodyContainer);
-      if (!this.isAFK && isNearUser) {
-        this.isAFK = false;
-      }
+    const timer = (this.afkThreshold - this.inactivityTime) / 1000;
+    if (!this.isAFK) {
+      console.log('AFK dans', timer, 'secondes');
     } else {
-      if (this.inactivityTime <= this.afkThreshold + 1000) {
-        this.inactivityTime += 60000;
-        console.log('+1000');
+      console.log('Vous êtes absent(e) AFK');
+    }
+    if (meet.api || isNearUser) {
+      this.switchAFKBack();
+    } else {
+      if (this.inactivityTime <= this.afkThreshold - 5000) {
+        this.inactivityTime += 30000;
       }
       if (this.inactivityTime >= this.afkThreshold && !isNearUser && !this.isAFK) {
-        this.isAFK = true;
-        this.switchAFK(characterBodyContainer);
+        this.switchAFK();
       }
     }
   },
 
-  switchAFK(body) {
+  switchAFK() {
+    this.isAFK = true;
     toggleUserProperty('shareVideo', false);
     toggleUserProperty('shareAudio', false);
     toggleUserProperty('shareScreen', false);
-    body.alpha = 0.5;
-    console.log('mode afk');
   },
 
-  switchAFKBack(body) {
+  switchAFKBack() {
     this.inactivityTime = 0;
     if (this.isAFK) {
       this.isAFK = false;
     }
-    toggleUserProperty('shareVideo', true);
-    toggleUserProperty('shareAudio', true);
-    body.alpha = 1;
-    console.log('sortie du mode afk');
   },
   // end of AFK management
 
@@ -537,6 +524,9 @@ userManager = {
     if (!peer.hasActiveStreams()) peer.enableSensor(!running);
 
     if (direction) {
+      // afk
+      this.switchAFKBack();
+      console.log(this.afkThreshold);
       this.player.direction = direction;
       this.pauseAnimation(this.player, false);
       this.updateAnimation(characterAnimations.run, this.player, direction);
